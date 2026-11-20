@@ -1,0 +1,13 @@
+node_modules
+dist
+*.local
+.DS_Store
+
+# local runtime state
+.agent-web/
+
+# local access credentials
+.agent-web-token
+.agent-web-auth.json
+
+.agent-desk/
