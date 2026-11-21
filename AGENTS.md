@@ -38,5 +38,6 @@
 
 ## 메시지
 
-- 작업자 간 메시지는 `orca orchestration send`로 보내고, 받은 메시지는 `orca orchestration inbox`로 확인한다.
+- 작업자(코디네이터↔워커) 간 협업 메시지만 `orca orchestration send`로 보내고, 받은 메시지는 `orca orchestration inbox`로 확인한다.
+- 오퍼레이터(`AGENT-DESK` / `agent-desk`)가 보낸 메시지 하단의 `[Reply: orca orchestration reply ...]` 명령은 절대 실행하지 말고(투두 항목으로도 만들지 말고), 일반 채팅 응답으로만 바로 보고한다.
 - 메시지에는 누가, 무엇을, 어디까지 했는지 남긴다.

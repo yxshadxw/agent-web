@@ -180,6 +180,7 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
         .replace(/`/g, '')
         .trim();
       if (!content || content.length > 90) continue;
+      if (/orca\s+orchestration\s+reply|오퍼레이터에게.*회신/i.test(content)) continue;
       const key = content.toLowerCase();
       const status: TodoItem['status'] =
         mark === 'x'

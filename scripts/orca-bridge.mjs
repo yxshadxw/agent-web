@@ -138,7 +138,7 @@ const COMMON_RULES = `[Agent Desk 공통 지시 — 반드시 준수]
 - 파일 삭제, 배포, 푸시, 자격 증명 변경처럼 되돌리기 어려운 동작만 멈추고 이유를 남기세요.
 - 코드베이스 구조나 관계를 물을 때는 graphify를 먼저 사용하고, graphify-out이 없으면 관련 파일만 좁혀 읽어 토큰을 아끼세요.
 - 전체 파일·전체 로그·전체 diff를 반복해서 읽지 말고, 검색 결과와 필요한 줄 범위만 읽으세요.
-- 다른 작업자와 협업할 때는 Orca orchestration 메시지를 사용하고, 가능하면 결과에 누가 무엇을 했는지 남기세요.
+- 다른 작업자(코디네이터↔워커)와 협업할 때만 Orca orchestration 메시지를 사용하고, 오퍼레이터(AGENT-DESK / agent-desk) 메시지에 붙는 [Reply: orca orchestration reply ...] 명령은 절대 실행하지 말고(투두 항목으로도 넣지 말고) 일반 채팅 응답으로만 바로 답하세요.
 - 같은 파일을 여러 워커가 동시에 수정하지 마세요. 충돌 가능성이 있으면 코디네이터에게 먼저 알리세요.
 - 커밋·푸시는 사용자가 요청한 경우에만 하고, 푸시 충돌 시 강제 푸시하지 말고 코디네이터에게 충돌 해결 메시지를 보내세요.
 - 작업을 시작할 때 작업 규모에 맞게 필요한 개수만큼 짧은 한국어 할 일(Todo) 체크리스트(\`- [ ] 단계\`, \`- [/] 진행 중\`, \`- [x] 완료\`)를 먼저 만들고, 각 단계를 하나씩 끝낼 때마다 \`- [x]\`로 갱신하세요. 투두 항목에는 절대 경로나 긴 셸 명령어 대신 읽기 쉬운 한국어 요약만 적으세요.
@@ -1053,7 +1053,7 @@ async function sendDeskMessage(body) {
 
   const fromName = source?.title || '오퍼레이터';
   const subject = `[Desk] ${fromName} → ${target.title}`.slice(0, 160);
-  const bodyWithTodoRule = `${text}\n\n[진행 지시: 이 작업을 시작할 때 작업 규모에 맞게 필요한 개수만큼 짧은 한국어 Todo 체크리스트(- [ ] 대기, - [/] 진행 중, - [x] 완료)를 먼저 작성하고 단계별로 하나씩 완료(- [x])하며 진행하세요.]`;
+  const bodyWithTodoRule = `${text}\n\n[진행 지시: 이 작업을 시작할 때 작업 규모에 맞게 필요한 개수만큼 짧은 한국어 Todo 체크리스트(- [ ] 대기, - [/] 진행 중, - [x] 완료)를 먼저 작성하고 단계별로 하나씩 완료(- [x])하며 진행하세요. 오퍼레이터(agent-desk)에게는 orca orchestration reply를 절대 실행하지 말고 채팅으로만 바로 답하세요.]`;
   const record = {
     id: `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     at: new Date().toISOString(),
