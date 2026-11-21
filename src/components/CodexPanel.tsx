@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { formatTokens } from '../data';
 import type { AgentProvider } from '../lib/api';
-import { switchEngine } from '../lib/engine';
+import { switchEngine, type AgentEngine } from '../lib/engine';
 import { BrandGlyph } from './Brand';
 import { AutoList } from './Sheets';
 import { SelectMenu } from './SelectMenu';

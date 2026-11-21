@@ -15,6 +15,7 @@ import {
   Sun,
 } from 'lucide-react';
 import { api, type AgyStatus } from '../lib/api';
+import { engineLabel, getEngine } from '../lib/engine';
 import { saveSettings, useAppSettings } from '../lib/preferences';
 
 type SettingsTab =
@@ -63,6 +64,7 @@ export function SettingsPanel({
   const [tab, setTab] = useState<SettingsTab>('conversation');
   const settings = useAppSettings();
   const [agyStatus, setAgyStatus] = useState<AgyStatus | null>(null);
+  const engine = getEngine();
   const panelRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
 
