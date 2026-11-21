@@ -47,6 +47,8 @@ html,
 body,
 #root {
   height: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -2135,9 +2137,11 @@ pre {
   padding: 6px 0;
   overflow-x: auto;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.65;
   scrollbar-width: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 .diff-lines::-webkit-scrollbar {
@@ -2190,6 +2194,9 @@ pre {
 
 .diff-line code {
   font-family: inherit;
+  font-size: inherit;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 .ghost-btn {
