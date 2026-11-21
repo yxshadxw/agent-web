@@ -1206,7 +1206,16 @@ function enrichAgyTools(entries) {
       const text = readFileSync(f, 'utf8');
       if (needle && !text.includes(JSON.stringify(needle).slice(1, -1))) continue;
       const calls = [];
+      const plain = [];
       for (const line of text.split('\n')) {
+        if (line.includes('"PLANNER_RESPONSE"') && line.includes('"thinking"')) {
+          try {
+            const r = JSON.parse(line);
+            if (r.thinking?.trim() && r.content?.trim() && !(r.tool_calls || []).length) {
+              plain.push({ key: r.content.trim().slice(0, 40), thinking: r.thinking.trim() });
+            }
+          } catch { /* skip */ }
+        }
         if (!line.includes('tool_calls')) continue;
         try {
           const row = JSON.parse(line);
@@ -1222,7 +1231,14 @@ function enrichAgyTools(entries) {
       const tail = calls.slice(-toolEntries.length);
       const offset = toolEntries.length - tail.length;
       let i = 0;
-      return entries.flatMap((e) => {
+      const withPlain = (list) =>
+        list.flatMap((e, n) => {
+          if (e.kind !== 'message' || e.role !== 'assistant' || !e.text) return [e];
+          if (list[n - 1]?.kind === 'thinking') return [e];
+          const hit = plain.find((p) => e.text.trim().startsWith(p.key));
+          return hit ? [{ kind: 'thinking', role: 'assistant', text: hit.thinking.slice(0, 20000) }, e] : [e];
+        });
+      return withPlain(entries.flatMap((e) => {
         if (e.kind !== 'tool') return [e];
         const c = tail[i - offset >= 0 ? i - offset : 0];
         const idx = i++;
@@ -1231,7 +1247,7 @@ function enrichAgyTools(entries) {
         return c.thinking
           ? [{ kind: 'thinking', role: 'assistant', text: c.thinking.slice(0, 20000) }, enriched]
           : [enriched];
-      });
+      }));
     }
   } catch { /* fall back to plain entries */ }
   return entries;
