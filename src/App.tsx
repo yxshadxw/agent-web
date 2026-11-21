@@ -4,7 +4,7 @@ import { Check, Loader2, Lock, RefreshCw, User, WifiOff, X } from 'lucide-react'
 import { Header } from './components/Header';
 import { Timeline } from './components/Timeline';
 import { Composer, type Attachment } from './components/Composer';
-import { AutoList, ContextSheet, ModelList, ReasonList, UsageSheet } from './components/Sheets';
+import { AutoList, ContextSheet, ModelList, ReasonList, UsageSheet, type UnifiedModelGroup } from './components/Sheets';
 import { InfoPanel } from './components/InfoPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ParallelDesk } from './components/ParallelDesk';
@@ -23,7 +23,7 @@ import {
   sessionCost,
   sessionTokens,
 } from './lib/api';
-import type { AgentSession } from './lib/api';
+import type { AgentProvider, AgentSession } from './lib/api';
 import {
   baseName,
   shortPath,
@@ -37,11 +37,9 @@ const DESK_OPEN_KEY = 'agent-web:desk-open:v1';
 
 function loadDeskOpen(): boolean {
   try {
-    const stored = localStorage.getItem(DESK_OPEN_KEY);
-    if (stored === '0') return false;
-    return true;
+    return localStorage.getItem(DESK_OPEN_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -83,6 +81,73 @@ export default function App() {
   const [pins, setPins] = useState<PinnedFile[]>([]);
   const [compressing, setCompressing] = useState(false);
   const [tick, setTick] = useState(0);
+  const [otherProviders, setOtherProviders] = useState<AgentProvider[]>([]);
+
+  useEffect(() => {
+    if (agent.auth !== 'ok' || codexMode) return;
+    let alive = true;
+    const otherUrl = engine === 'agy' ? '/api/config/providers' : '/agy-api/config/providers';
+    fetch(otherUrl, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!alive) return;
+        const list = Array.isArray(data?.providers) ? data.providers : [];
+        setOtherProviders(list);
+      })
+      .catch(() => {
+        if (alive) setOtherProviders([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [agent.auth, codexMode, engine]);
+
+  const unifiedModelGroups = useMemo<UnifiedModelGroup[]>(() => {
+    const groups: UnifiedModelGroup[] = [];
+    const currentList = agent.providers?.providers || [];
+    const agyList = engine === 'agy' ? currentList : otherProviders;
+    const ocList = engine === 'opencode' ? currentList : otherProviders;
+
+    const toItems = (list: AgentProvider[]) =>
+      list.flatMap((provider) =>
+        Object.values(provider.models || {}).map((model) => ({
+          providerID: provider.id,
+          modelID: model.id,
+          name: model.name || model.id,
+          sub: model.id,
+        })),
+      );
+
+    const agyItems = toItems(agyList);
+    if (agyItems.length) {
+      groups.push({ id: 'agy', label: 'Agy (Antigravity)', engine: 'agy', items: agyItems });
+    }
+    const ocItems = toItems(ocList);
+    if (ocItems.length) {
+      groups.push({ id: 'opencode', label: 'OpenCode', engine: 'opencode', items: ocItems });
+    }
+    groups.push({
+      id: 'codex',
+      label: 'Codex',
+      engine: 'codex',
+      items: [
+        { providerID: 'codex', modelID: 'gpt-6-luna', name: 'GPT-6 Luna', sub: 'Codex CLI' },
+        { providerID: 'codex', modelID: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', sub: 'Codex CLI' },
+        { providerID: 'codex', modelID: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', sub: 'Codex CLI' },
+      ],
+    });
+    groups.push({
+      id: 'claude',
+      label: 'Claude Code',
+      engine: 'codex',
+      items: [
+        { providerID: 'claude', modelID: 'claude:claude-opus-4-6', name: 'Claude Opus 4.6', sub: 'Claude CLI' },
+        { providerID: 'claude', modelID: 'claude:claude-sonnet-4-6', name: 'Claude Sonnet 4.6', sub: 'Claude CLI' },
+        { providerID: 'claude', modelID: 'claude:claude-haiku-4-5', name: 'Claude Haiku 4.5', sub: 'Claude CLI' },
+      ],
+    });
+    return groups;
+  }, [agent.providers, engine, otherProviders]);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -504,26 +569,25 @@ export default function App() {
         }}
       />
     ) : panel === 'model' ? (
-      agent.providers ? (
-        <ModelList
-          providers={agent.providers.providers}
-          providerID={agent.model.providerID}
-          modelID={agent.model.modelID}
-          onAdd={
-            engine === 'opencode'
-              ? () => showToast('모델은 OpenCode 설정에서 추가할 수 있어요')
-              : undefined
-          }
-          onPick={(providerID, modelID) => {
-            pickModel(providerID, modelID);
+      <ModelList
+        providers={agent.providers?.providers || []}
+        providerID={agent.model.providerID}
+        modelID={agent.model.modelID}
+        currentEngine={engine}
+        groups={unifiedModelGroups}
+        onPick={(providerID, modelID, targetEngine) => {
+          if (targetEngine && targetEngine !== engine) {
             setPanel(null);
-          }}
-        />
-      ) : (
-        <div className="sheet-content">
-          <div className="sheet-empty">모델을 불러오는 중…</div>
-        </div>
-      )
+            switchEngine(
+              targetEngine,
+              targetEngine === 'codex' ? { codexModel: modelID } : { providerID, modelID },
+            );
+            return;
+          }
+          pickModel(providerID, modelID);
+          setPanel(null);
+        }}
+      />
     ) : panel === 'reason' ? (
       <ReasonList
         options={variants}

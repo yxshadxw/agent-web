@@ -7620,3 +7620,9 @@ a {
 .desk-freebuff-toolbar .tb-item.timer .timer-ring {
   animation: none;
 }
+
+.desk-agent-badge.claude {
+  border-color: rgba(217, 119, 87, 0.36);
+  background: rgba(217, 119, 87, 0.14);
+  color: #f4a487;
+}

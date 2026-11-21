@@ -166,9 +166,14 @@ const MODEL_OPTIONS: Record<string, ModelOption[]> = {
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
   ],
   claude: [
-    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+    { id: 'claude-opus-4-6-medium', label: 'Claude Opus 4.6 (Medium)' },
+    { id: 'claude-opus-4-6-high', label: 'Claude Opus 4.6 (High)' },
+    { id: 'claude-opus-4-6-max', label: 'Claude Opus 4.6 (Max)' },
+    { id: 'claude-sonnet-4-6-low', label: 'Claude Sonnet 4.6 (Low)' },
+    { id: 'claude-sonnet-4-6-medium', label: 'Claude Sonnet 4.6 (Medium)' },
+    { id: 'claude-sonnet-4-6-high', label: 'Claude Sonnet 4.6 (High)' },
+    { id: 'claude-haiku-4-5-low', label: 'Claude Haiku 4.5 (Low)' },
+    { id: 'claude-haiku-4-5-medium', label: 'Claude Haiku 4.5 (Medium)' },
   ],
   codex: [
     { id: 'gpt-6-luna-medium', label: 'GPT-6 Luna (Medium)' },

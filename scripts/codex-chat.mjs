@@ -121,7 +121,112 @@ function run(command, args, timeout = 20_000) {
   });
 }
 
+function runClaude(prompt, threadId, root, options = {}) {
+  return new Promise((resolve, reject) => {
+    const modelName = String(options.model || '').replace(/^claude:/, '').trim();
+    const effort = options.effort && ['low', 'medium', 'high', 'xhigh', 'max'].includes(options.effort)
+      ? options.effort
+      : '';
+    const args = [
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--permission-mode',
+      options.autoApprove ? 'bypassPermissions' : 'acceptEdits',
+      ...(modelName ? ['--model', modelName] : []),
+      ...(effort ? ['--effort', effort] : []),
+      ...(threadId ? ['--resume', threadId] : []),
+      prompt,
+    ];
+    const child = spawn(process.env.CLAUDE_BIN || 'claude', args, {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    });
+    let buffer = '';
+    let stderr = '';
+    let resolvedThread = threadId || null;
+    let text = '';
+    let reasoning = '';
+    const toolsById = new Map();
+    let usage = null;
+    let finished = false;
+    const finish = (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (error) return reject(error);
+      resolve({
+        threadId: resolvedThread,
+        text: text.trim(),
+        reasoning: reasoning.trim(),
+        tools: [...toolsById.values()],
+        usage,
+      });
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish(new Error('Claude 응답 시간이 초과됐습니다.'));
+    }, TURN_TIMEOUT);
+    const consume = (line) => {
+      const value = line.trim();
+      if (!value) return;
+      let event;
+      try {
+        event = JSON.parse(value);
+      } catch {
+        return;
+      }
+      if (event.session_id) resolvedThread = event.session_id;
+      if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
+        for (const block of event.message.content) {
+          if (block.type === 'text' && block.text) text = block.text;
+          else if (block.type === 'thinking' && block.thinking) reasoning = block.thinking;
+          else if (block.type === 'tool_use') {
+            toolsById.set(block.id || `${block.name}:${toolsById.size}`, {
+              id: block.id || '',
+              kind: 'tool',
+              title: block.name || 'tool',
+              detail: typeof block.input === 'object' ? JSON.stringify(block.input).slice(0, 120) : '',
+              status: 'completed',
+              output: '',
+            });
+          }
+        }
+      }
+      if (event.type === 'result') {
+        if (typeof event.result === 'string' && event.result.trim()) text = event.result;
+        if (event.usage) {
+          const input = (event.usage.input_tokens || 0) + (event.usage.cache_read_input_tokens || 0);
+          const output = event.usage.output_tokens || 0;
+          usage = { input, cached: event.usage.cache_read_input_tokens || 0, output, total: input + output, context: input + output, contextWindow: 200_000 };
+        }
+      }
+    };
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) consume(line);
+    });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.on('error', (error) => finish(error));
+    child.on('close', (code) => {
+      if (buffer.trim()) consume(buffer);
+      if (code !== 0 && !text.trim()) {
+        finish(new Error(stderr.trim() || `Claude가 종료 코드 ${code}(으)로 끝났습니다.`));
+        return;
+      }
+      finish(null);
+    });
+  });
+}
+
 function runCodex(prompt, threadId, root, options = {}) {
+  if (typeof options.model === 'string' && options.model.startsWith('claude:')) {
+    return runClaude(prompt, threadId, root, options);
+  }
   return new Promise((resolve, reject) => {
     const modelArgs = options.model ? ['--model', options.model] : [];
     // Ask Codex to emit reasoning summaries so `exec --json` produces

@@ -15,7 +15,6 @@ import {
   Sun,
 } from 'lucide-react';
 import { api, type AgyStatus } from '../lib/api';
-import { engineLabel, getEngine, switchEngine } from '../lib/engine';
 import { saveSettings, useAppSettings } from '../lib/preferences';
 
 type SettingsTab =
@@ -64,7 +63,6 @@ export function SettingsPanel({
   const [tab, setTab] = useState<SettingsTab>('conversation');
   const settings = useAppSettings();
   const [agyStatus, setAgyStatus] = useState<AgyStatus | null>(null);
-  const engine = getEngine();
   const panelRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
 
@@ -317,54 +315,10 @@ export function SettingsPanel({
           {tab === 'connection' && (
             <>
               <section className="settings-section">
-                <h2 className="settings-section-title">에이전트 엔진</h2>
-                <div className="engine-choice" role="radiogroup" aria-label="에이전트 엔진">
-                  <button
-                    className={engine === 'agy' ? 'selected' : ''}
-                    role="radio"
-                    aria-checked={engine === 'agy'}
-                    onClick={() => switchEngine('agy')}
-                  >
-                    <span className="engine-choice-head">
-                      <Sparkles size={15} />
-                      Agy
-                      {engine === 'agy' && <em>사용 중</em>}
-                    </span>
-                    <span className="engine-choice-desc">
-                      ACP · Antigravity
-                      {agyStatus?.ok && agyStatus.version ? ` v${agyStatus.version}` : ''}
-                    </span>
-                  </button>
-                  <button
-                    className={engine === 'opencode' ? 'selected' : ''}
-                    role="radio"
-                    aria-checked={engine === 'opencode'}
-                    onClick={() => switchEngine('opencode')}
-                  >
-                    <span className="engine-choice-head">
-                      <Code2 size={15} />
-                      OpenCode
-                      {engine === 'opencode' && <em>사용 중</em>}
-                    </span>
-                    <span className="engine-choice-desc">HTTP · port 4097</span>
-                  </button>
-                  <button
-                    className={engine === 'codex' ? 'selected' : ''}
-                    role="radio"
-                    aria-checked={engine === 'codex'}
-                    onClick={() => switchEngine('codex')}
-                  >
-                    <span className="engine-choice-head">
-                      <Bot size={15} />
-                      Codex
-                      {engine === 'codex' && <em>사용 중</em>}
-                    </span>
-                    <span className="engine-choice-desc">CLI · ChatGPT</span>
-                  </button>
-                </div>
+                <h2 className="settings-section-title">연결 상태</h2>
                 <p className="settings-note">
-                  엔진을 바꾸면 페이지가 새로고침됩니다. 세션과 모델 선택은 엔진별로
-                  분리됩니다.
+                  모델 선택창에서 Agy · OpenCode · Codex · Claude 모델을 바로 전환할 수
+                  있습니다.
                 </p>
               </section>
 

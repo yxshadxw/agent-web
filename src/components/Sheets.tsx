@@ -2,21 +2,72 @@ import { useEffect, useRef } from 'react';
 import { Check, Plus, X } from 'lucide-react';
 import anime from 'animejs';
 import type { AgentProvider, AgentSession, AgyQuota, Tokens } from '../lib/api';
+import type { AgentEngine } from '../lib/engine';
 import { formatTokens, type PinnedFile } from '../data';
 import { QuotaSection } from './Quota';
+
+export type UnifiedModelGroup = {
+  id: string;
+  label: string;
+  engine: AgentEngine;
+  items: { providerID: string; modelID: string; name: string; sub?: string }[];
+};
 
 type ModelProps = {
   providers: AgentProvider[];
   providerID: string;
   modelID: string;
-  onPick: (providerID: string, modelID: string) => void;
+  currentEngine?: AgentEngine;
+  groups?: UnifiedModelGroup[];
+  onPick: (providerID: string, modelID: string, targetEngine?: AgentEngine) => void;
   onAdd?: () => void;
 };
 
-export function ModelList({ providers, providerID, modelID, onPick, onAdd }: ModelProps) {
+export function ModelList({
+  providers,
+  providerID,
+  modelID,
+  currentEngine,
+  groups,
+  onPick,
+  onAdd,
+}: ModelProps) {
   const rows = providers.flatMap((provider) =>
     Object.values(provider.models).map((model) => ({ provider, model })),
   );
+
+  if (groups && groups.length > 0) {
+    return (
+      <div className="sheet-content model-sheet">
+        {groups.map((group) => (
+          <div key={group.id} className="model-group">
+            <div className="sheet-head">
+              <span className="sheet-title">{group.label}</span>
+              <span className="sheet-sub">{group.items.length}개</span>
+            </div>
+            <div className="sheet-list">
+              {group.items.map((item) => {
+                const selected =
+                  (!currentEngine || currentEngine === group.engine) &&
+                  item.providerID === providerID &&
+                  item.modelID === modelID;
+                return (
+                  <button
+                    key={`${group.id}:${item.providerID}/${item.modelID}`}
+                    className={`sheet-row model-row ${selected ? 'selected' : ''}`}
+                    onClick={() => onPick(item.providerID, item.modelID, group.engine)}
+                  >
+                    <span className="model-name">{item.name}</span>
+                    <span className="row-provider">{item.sub || item.modelID}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="sheet-content model-sheet">

@@ -25,7 +25,8 @@ import {
   X,
 } from 'lucide-react';
 import { formatTokens } from '../data';
-import { switchEngine, type AgentEngine } from '../lib/engine';
+import type { AgentProvider } from '../lib/api';
+import { switchEngine } from '../lib/engine';
 import { BrandGlyph } from './Brand';
 import { AutoList } from './Sheets';
 import { SelectMenu } from './SelectMenu';
@@ -94,6 +95,9 @@ const CODEX_MODELS = [
   { value: 'gpt-6-luna', label: 'GPT-6 Luna', description: '범용 코딩 · 현재 CLI 기본', meta: '272k' },
   { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: '긴 작업 · 최대 effort', meta: '272k' },
   { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', description: '빠른 코딩', meta: '272k' },
+  { value: 'claude:claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Claude Code CLI', meta: '200k' },
+  { value: 'claude:claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Claude Code CLI', meta: '200k' },
+  { value: 'claude:claude-haiku-4-5', label: 'Claude Haiku 4.5', description: 'Claude Code CLI', meta: '200k' },
 ];
 const CODEX_EFFORTS = [
   { value: 'low', label: 'Low', description: '빠른 응답', meta: 'light' },
@@ -266,7 +270,35 @@ export function CodexPanel({
   const [messages, setMessages] = useState<CodexMessage[]>(initial.current.messages);
   const [threadId, setThreadId] = useState(initial.current.threadId);
   const [usage, setUsage] = useState<CodexUsage | null>(initial.current.usage ?? null);
-  const [model, setModel] = useState(initial.current.model ?? '');
+  const [model, setModel] = useState(() => {
+    try {
+      const pending = localStorage.getItem('agent-web:codex-pending-model');
+      if (pending !== null) {
+        localStorage.removeItem('agent-web:codex-pending-model');
+        return pending;
+      }
+    } catch {
+      // ignore
+    }
+    return initial.current.model ?? '';
+  });
+  const [agyProviders, setAgyProviders] = useState<AgentProvider[]>([]);
+  const [ocProviders, setOcProviders] = useState<AgentProvider[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([
+      fetch('/agy-api/config/providers', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/config/providers', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([agyRes, ocRes]) => {
+      if (!alive) return;
+      if (Array.isArray(agyRes?.providers)) setAgyProviders(agyRes.providers);
+      if (Array.isArray(ocRes?.providers)) setOcProviders(ocRes.providers);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [effort, setEffort] = useState(initial.current.effort ?? 'medium');
   const [autoApprove, setAutoApprove] = useState(Boolean(initial.current.autoApprove));
   const [permissionOpen, setPermissionOpen] = useState(false);
@@ -973,8 +1005,8 @@ export function CodexPanel({
                 {settingsPanel === 'model' ? (
                   <div className="sheet-content model-sheet">
                     <div className="sheet-head">
-                      <span className="sheet-title">모델</span>
-                      <span className="sheet-sub">Codex CLI</span>
+                      <span className="sheet-title">Codex · Claude</span>
+                      <span className="sheet-sub">{CODEX_MODELS.length}개</span>
                     </div>
                     <div className="sheet-list">
                       {CODEX_MODELS.map((option) => (
@@ -992,6 +1024,56 @@ export function CodexPanel({
                         </button>
                       ))}
                     </div>
+                    {agyProviders.length > 0 && (
+                      <>
+                        <div className="sheet-head">
+                          <span className="sheet-title">Agy (Antigravity)</span>
+                        </div>
+                        <div className="sheet-list">
+                          {agyProviders.flatMap((provider) =>
+                            Object.values(provider.models || {}).map((m) => (
+                              <button
+                                type="button"
+                                key={`agy:${provider.id}/${m.id}`}
+                                className="sheet-row model-row"
+                                onClick={() => {
+                                  closeSettings();
+                                  switchEngine('agy', { providerID: provider.id, modelID: m.id });
+                                }}
+                              >
+                                <span className="model-name">{m.name || m.id}</span>
+                                <span className="row-provider">{m.id}</span>
+                              </button>
+                            )),
+                          )}
+                        </div>
+                      </>
+                    )}
+                    {ocProviders.length > 0 && (
+                      <>
+                        <div className="sheet-head">
+                          <span className="sheet-title">OpenCode</span>
+                        </div>
+                        <div className="sheet-list">
+                          {ocProviders.flatMap((provider) =>
+                            Object.values(provider.models || {}).map((m) => (
+                              <button
+                                type="button"
+                                key={`oc:${provider.id}/${m.id}`}
+                                className="sheet-row model-row"
+                                onClick={() => {
+                                  closeSettings();
+                                  switchEngine('opencode', { providerID: provider.id, modelID: m.id });
+                                }}
+                              >
+                                <span className="model-name">{m.name || m.id}</span>
+                                <span className="row-provider">{m.id}</span>
+                              </button>
+                            )),
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="sheet-content reason-sheet">

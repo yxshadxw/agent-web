@@ -217,6 +217,17 @@ async function listAgentModels(agentName) {
           .replace(/-/g, ' ')
           .replace(/\b\w/g, (c) => c.toUpperCase()),
       }));
+  } else if (agentName === 'claude') {
+    models = [
+      { id: 'claude-opus-4-6-medium', label: 'Claude Opus 4.6 (Medium)' },
+      { id: 'claude-opus-4-6-high', label: 'Claude Opus 4.6 (High)' },
+      { id: 'claude-opus-4-6-max', label: 'Claude Opus 4.6 (Max)' },
+      { id: 'claude-sonnet-4-6-low', label: 'Claude Sonnet 4.6 (Low)' },
+      { id: 'claude-sonnet-4-6-medium', label: 'Claude Sonnet 4.6 (Medium)' },
+      { id: 'claude-sonnet-4-6-high', label: 'Claude Sonnet 4.6 (High)' },
+      { id: 'claude-haiku-4-5-low', label: 'Claude Haiku 4.5 (Low)' },
+      { id: 'claude-haiku-4-5-medium', label: 'Claude Haiku 4.5 (Medium)' },
+    ];
   }
 
   modelListCache.set(agentName, { at: Date.now(), models });
@@ -1974,7 +1985,16 @@ async function launchOne({ worktree, agent, prompt, isolate, model, index, role 
         '--surface',
         surface,
       ];
-  if (model) args.push('--model', model);
+  if (model) {
+    const effMatch =
+      (agent === 'claude' || agent === 'codex') &&
+      model.match(/^(.+)-(low|medium|high|xhigh|max)$/i);
+    if (effMatch) {
+      args.push('--model', effMatch[1], '--effort', effMatch[2].toLowerCase());
+    } else {
+      args.push('--model', model);
+    }
+  }
   args.push('--json');
 
   const result = await runOrca(args, 120_000);

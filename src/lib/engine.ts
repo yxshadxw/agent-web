@@ -40,15 +40,37 @@ export function engineLabel(engine = getEngine()) {
   return 'OpenCode';
 }
 
+export type EnginePreselect = {
+  providerID?: string;
+  modelID?: string;
+  codexModel?: string;
+};
+
 /**
  * Session IDs and model IDs are engine-specific. Reload after changing engines
  * so no hook keeps a stale EventSource or a session from the other backend.
  */
-export function switchEngine(engine: AgentEngine) {
+export function switchEngine(engine: AgentEngine, preselect?: EnginePreselect) {
   if (engine === getEngine()) return;
   setEngine(engine);
-  for (const key of [...SESSION_KEYS, ...MODEL_KEYS]) {
+  for (const key of SESSION_KEYS) {
     localStorage.removeItem(key);
+  }
+  if (preselect?.codexModel !== undefined) {
+    localStorage.setItem('agent-web:codex-pending-model', preselect.codexModel);
+  } else if (preselect?.providerID && preselect?.modelID) {
+    localStorage.setItem(
+      `agent-web:model:${engine}`,
+      JSON.stringify({
+        providerID: preselect.providerID,
+        modelID: preselect.modelID,
+        variant: '',
+      }),
+    );
+  } else {
+    for (const key of MODEL_KEYS) {
+      localStorage.removeItem(key);
+    }
   }
   window.location.reload();
 }
