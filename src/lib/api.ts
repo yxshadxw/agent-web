@@ -292,10 +292,18 @@ export const api = {
     permissionID: string,
     response: 'once' | 'always' | 'reject',
   ) =>
-    request<boolean>(`/session/${sessionID}/permissions/${permissionID}`, {
+    request<boolean>(`/permission/${permissionID}/reply`, {
       method: 'POST',
-      body: JSON.stringify({ response }),
-    }),
+      body: JSON.stringify({ reply: response }),
+    }).catch(() =>
+      request<boolean>(`/session/${sessionID}/permissions/${permissionID}`, {
+        method: 'POST',
+        body: JSON.stringify({ response }),
+      }),
+    ),
+
+  pendingPermissions: () =>
+    request<any[]>('/permission').catch(() => [] as any[]),
 };
 
 export function modelKey(providerID: string, modelID: string) {

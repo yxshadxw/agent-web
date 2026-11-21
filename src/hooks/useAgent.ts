@@ -443,8 +443,15 @@ export function useAgent() {
           setDiffs(parsed.properties.diff);
           break;
         }
-        case 'permission.updated': {
-          const permission = parsed.properties;
+        case 'permission.updated':
+        case 'permission.asked' as any: {
+          const raw = (parsed as any).properties;
+          const permission = {
+            ...raw,
+            title:
+              raw.title ||
+              `${raw.permission || raw.type || 'permission'} ${(raw.patterns || []).join(', ')}`.trim(),
+          } as PermissionRequest;
           if (autoApproveRef.current) {
             void api
               .replyPermission(permission.sessionID, permission.id, 'once')
@@ -565,6 +572,31 @@ export function useAgent() {
     } finally {
       setSending(false);
     }
+  }, []);
+
+  useEffect(() => {
+    // Catch permission requests missed by the event stream (e.g. emitted while
+    // the page was backgrounded) so a tool never waits forever.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void api.pendingPermissions().then((list) => {
+        for (const raw of list) {
+          if (sessionRef.current && raw.sessionID !== sessionRef.current) continue;
+          if (autoApproveRef.current) {
+            void api.replyPermission(raw.sessionID, raw.id, 'once').catch(() => undefined);
+          } else {
+            const permission = {
+              ...raw,
+              title: raw.title || `${raw.permission} ${(raw.patterns || []).join(', ')}`.trim(),
+            } as PermissionRequest;
+            setPermissions((current) =>
+              current.some((item) => item.id === permission.id) ? current : [...current, permission],
+            );
+          }
+        }
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
   }, []);
 
   const replyPermission = useCallback(
