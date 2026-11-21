@@ -786,6 +786,20 @@ export function CodexPanel({
             </div>
           )}
 
+          {!busy && !error && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
+            <div className="codex-error">
+              <AlertTriangle size={15} />
+              <span>응답을 받기 전에 연결이 새로고침되었어요.</span>
+              <button
+                type="button"
+                className="meta-btn"
+                onClick={() => void send(messages[messages.length - 1].text)}
+              >
+                다시 보내기
+              </button>
+            </div>
+          )}
+
           {error && (
             <div className="codex-error">
               <AlertTriangle size={15} />
