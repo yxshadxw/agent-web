@@ -3401,9 +3401,8 @@ function LogDrawer({
     setSendError(null);
     try {
       if (agent.terminalHandle) {
-        await orcaApi.sendTerminal(agent.terminalHandle, `/model ${modelId}`);
-      } else if (isAgy && agent.id) {
-        await orcaApi.sendMessage({ text: `/model ${modelId}`, toId: agent.id });
+        const opened = await orcaApi.sendTerminal(agent.terminalHandle, '/model');
+        if (!opened.ok) throw new Error(opened.error || '/model 명령을 열지 못했어요.');
       }
       if (agent.orcaSessionId) {
         localStorage.setItem(`agyModel:${agent.orcaSessionId}`, modelId);
