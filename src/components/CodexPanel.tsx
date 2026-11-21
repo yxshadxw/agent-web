@@ -27,8 +27,10 @@ import {
 import { formatTokens } from '../data';
 import type { AgentProvider } from '../lib/api';
 import { switchEngine, type AgentEngine } from '../lib/engine';
+import { useAgyQuota } from '../hooks/useQuota';
 import { BrandGlyph } from './Brand';
 import { AutoList } from './Sheets';
+import { QuotaSection } from './Quota';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import { SelectMenu } from './SelectMenu';
 
@@ -271,12 +273,22 @@ function loadStored(): StoredChat {
   }
 }
 
+export type CodexPanelState = {
+  threadId: string;
+  modelLabel: string;
+  effort: string;
+  usage: CodexUsage | null;
+  quota: CodexQuota | null;
+};
+
 export function CodexPanel({
   onClose,
   standalone = false,
   embedded = false,
   statsOpen,
   onStatsOpen,
+  onOpenInfo,
+  onStateChange,
   resetKey,
 }: {
   onClose?: () => void;
@@ -284,6 +296,8 @@ export function CodexPanel({
   embedded?: boolean;
   statsOpen?: boolean;
   onStatsOpen?: (open: boolean) => void;
+  onOpenInfo?: () => void;
+  onStateChange?: (state: CodexPanelState) => void;
   resetKey?: number;
 }) {
   const initial = useRef(loadStored());
@@ -372,6 +386,17 @@ export function CodexPanel({
     [...CODEX_MODELS, ...CLAUDE_MODELS].find((option) => option.value === model) ||
     CODEX_MODELS[0];
   const selectedEffort = CODEX_EFFORTS.find((option) => option.value === effort) || CODEX_EFFORTS[1];
+  const { quota: agyQuota, loading: agyQuotaLoading, refresh: refreshAgyQuota } = useAgyQuota(true);
+
+  useEffect(() => {
+    onStateChange?.({
+      threadId,
+      modelLabel: selectedModel.label,
+      effort: selectedEffort.label,
+      usage,
+      quota,
+    });
+  }, [onStateChange, quota, selectedEffort.label, selectedModel.label, threadId, usage]);
   const elapsedLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
 
   const dismissSettings = () => {
@@ -872,7 +897,7 @@ export function CodexPanel({
             <article className="codex-agy-turn" role="status">
               {(liveTurn?.reasoning || !liveTurn?.text) && (
                 <CodexThinking
-                  text={liveTurn?.reasoning || '생각하는 중…'}
+                  text={liveTurn?.reasoning || '작업 중…'}
                   busy={!liveTurn?.text}
                 />
               )}
@@ -937,78 +962,22 @@ export function CodexPanel({
                     <X size={15} />
                   </button>
                 </div>
-                <section className="quota-section" aria-label="Codex 계정 한도">
-                  <div className="quota-head">
-                    <div className="quota-heading">
-                      <Gauge size={15} />
-                      <div>
-                        <div className="quota-title">Codex 계정</div>
-                        <div className="quota-caption">
-                          ChatGPT {quota?.plan || 'plan'} · 실제 계정 한도
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="quota-refresh"
-                      onClick={loadQuota}
-                      disabled={quotaLoading}
-                      aria-label="Codex 계정 한도 새로고침"
-                    >
-                      <RefreshCw size={13} className={quotaLoading ? 'spin' : ''} />
-                    </button>
+                <QuotaSection
+                  quota={agyQuota}
+                  loading={agyQuotaLoading || quotaLoading}
+                  onRefresh={() => {
+                    loadQuota();
+                    void refreshAgyQuota();
+                  }}
+                  codexQuota={quota}
+                  activeEngine="codex"
+                />
+                {quotaError && !quota && (
+                  <div className="quota-error">
+                    <span>{quotaError}</span>
+                    <button type="button" onClick={loadQuota}>다시 확인</button>
                   </div>
-                  {quotaLoading && !quota ? (
-                    <div className="quota-loading">
-                      <Loader2 size={14} className="spin" />
-                      Codex 계정 한도를 확인하는 중…
-                    </div>
-                  ) : quotaError ? (
-                    <div className="quota-error">
-                      <span>{quotaError}</span>
-                      <button type="button" onClick={loadQuota}>다시 확인</button>
-                    </div>
-                  ) : quotaWindows.length > 0 ? (
-                    <article className="quota-card">
-                      {quotaWindows.map((entry) => {
-                        const window = entry.window as CodexQuotaWindow;
-                        const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
-                        return (
-                          <div className="quota-window" key={entry.label}>
-                            <div className="quota-group-head">
-                              <span className="quota-group-name">
-                                {quotaLabel(window) || entry.label}
-                              </span>
-                              <span className="quota-group-meta">
-                                {quota?.plan ? `ChatGPT ${quota.plan}` : 'ChatGPT'}
-                              </span>
-                            </div>
-                            <div className="quota-line">
-                              <span>남은 한도</span>
-                              <strong>{remaining}%</strong>
-                            </div>
-                            <div className="bar quota-bar">
-                              <span
-                                className="bar-fill"
-                                style={{ width: `${remaining}%` }}
-                              />
-                            </div>
-                            <div className="quota-reset">
-                              {window.usedPercent}% 사용 · {resetLabel(window)}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </article>
-                  ) : (
-                    <div className="quota-empty">
-                      Codex CLI가 계정 한도 창을 반환하지 않았어요.
-                    </div>
-                  )}
-                  <div className="quota-foot">
-                    Codex app-server의 account/rateLimits/read에서 읽은 실제 계정 한도입니다.
-                  </div>
-                </section>
+                )}
                 <section className="quota-section" aria-label="Codex 컨텍스트">
                   <div className="quota-head">
                     <div className="quota-heading">
@@ -1044,6 +1013,18 @@ export function CodexPanel({
                     </div>
                   </article>
                 </section>
+                {onOpenInfo && (
+                  <button
+                    type="button"
+                    className="wide-btn sheet-anim"
+                    onClick={() => {
+                      closeStats();
+                      onOpenInfo();
+                    }}
+                  >
+                    정보 창에서 보기
+                  </button>
+                )}
                 <div className="usage-divider">
                   <span>이 세션</span>
                   <span>입력·출력 토큰</span>

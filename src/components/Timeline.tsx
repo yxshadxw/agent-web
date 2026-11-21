@@ -140,7 +140,7 @@ export function Timeline({
           <span className="agent-dot" />
           <div className="bubble agent typing">
             <Loader2 size={14} className="spin" />
-            <span>생각하는 중…</span>
+            <span>작업 중…</span>
           </div>
         </div>
       )}

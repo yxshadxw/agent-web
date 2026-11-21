@@ -36,7 +36,18 @@ import {
   type InfoTab,
   type PinnedFile,
 } from '../data';
-import { QuotaSection } from './Quota';
+import { QuotaSection, type CodexQuotaSnapshot } from './Quota';
+
+export type TeamTreeAgent = {
+  id: string;
+  name: string;
+  model?: string;
+  role?: 'coordinator' | 'worker' | null;
+  agent?: string;
+  state?: string;
+  inherit?: boolean;
+  onSelect?: () => void;
+};
 
 type Props = {
   open: boolean;
@@ -53,7 +64,13 @@ type Props = {
   pathInfo: PathInfo | null;
   providers: string;
   modelName: string;
+  effort?: string;
   contextLimit: number;
+  contextUsed?: number;
+  tokenOverride?: Tokens;
+  activeEngine?: string;
+  codexQuota?: CodexQuotaSnapshot | null;
+  teamAgents?: TeamTreeAgent[];
   quota: AgyQuota | null;
   quotaLoading: boolean;
   onRefreshQuota: () => void;
@@ -78,7 +95,13 @@ export function InfoPanel({
   pathInfo,
   providers,
   modelName,
+  effort,
   contextLimit,
+  contextUsed,
+  tokenOverride,
+  activeEngine,
+  codexQuota,
+  teamAgents,
   quota,
   quotaLoading,
   onRefreshQuota,
@@ -171,8 +194,8 @@ export function InfoPanel({
 
   if (!mounted) return null;
 
-  const used = contextTokens(messages);
-  const tokens = sessionTokens(messages, session);
+  const used = contextUsed ?? contextTokens(messages);
+  const tokens = tokenOverride ?? sessionTokens(messages, session);
   const cost = sessionCost(messages, session);
 
   return createPortal(
@@ -211,9 +234,13 @@ export function InfoPanel({
               tokens={tokens}
               cost={cost}
               modelName={modelName}
+              effort={effort}
               providers={providers}
               vcs={vcs}
               pathInfo={pathInfo}
+              activeEngine={activeEngine}
+              codexQuota={codexQuota}
+              teamAgents={teamAgents}
               quota={quota}
               quotaLoading={quotaLoading}
               onRefreshQuota={onRefreshQuota}
@@ -263,16 +290,19 @@ export function InfoPanel({
 function InfoTabContent({
   session,
   parentSession,
-  messages,
   children,
   used,
   limit,
   tokens,
   cost,
   modelName,
+  effort,
   providers,
   vcs,
   pathInfo,
+  activeEngine,
+  codexQuota,
+  teamAgents,
   quota,
   quotaLoading,
   onRefreshQuota,
@@ -288,9 +318,13 @@ function InfoTabContent({
   tokens: Tokens;
   cost: number;
   modelName: string;
+  effort?: string;
   providers: string;
   vcs: VcsInfo | null;
   pathInfo: PathInfo | null;
+  activeEngine?: string;
+  codexQuota?: CodexQuotaSnapshot | null;
+  teamAgents?: TeamTreeAgent[];
   quota: AgyQuota | null;
   quotaLoading: boolean;
   onRefreshQuota: () => void;
@@ -300,6 +334,10 @@ function InfoTabContent({
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
   const directory = session?.directory || pathInfo?.worktree || '';
   const created = session?.time.created;
+  const coordinatorNodes = (teamAgents || []).filter((a) => a.role === 'coordinator');
+  const workerNodes = (teamAgents || []).filter((a) => a.role === 'worker');
+  const cliNodes = (teamAgents || []).filter((a) => !a.role);
+  const totalTreeCount = children.length + (teamAgents?.length || 0);
 
   const copyId = async () => {
     if (!session) return;
@@ -318,6 +356,8 @@ function InfoTabContent({
           quota={quota}
           loading={quotaLoading}
           onRefresh={onRefreshQuota}
+          codexQuota={codexQuota}
+          activeEngine={activeEngine}
         />
         <div className="tab-empty">
           <Bot size={26} />
@@ -344,6 +384,8 @@ function InfoTabContent({
         quota={quota}
         loading={quotaLoading}
         onRefresh={onRefreshQuota}
+        codexQuota={codexQuota}
+        activeEngine={activeEngine}
       />
 
       <section className="info-section">
@@ -367,7 +409,7 @@ function InfoTabContent({
           </div>
           <div className="detail-row">
             <span className="detail-key">모델</span>
-            <span className="detail-value">{modelName}</span>
+            <span className="detail-value">{modelName}{effort ? ` · ${effort}` : ''}</span>
           </div>
           <div className="detail-row">
             <span className="detail-key">시작</span>
@@ -423,40 +465,121 @@ function InfoTabContent({
       <section className="info-section tree-section">
         <div className="section-head">
           <h3 className="section-title">서브에이전트 가계도</h3>
-          <span className="section-count">{children.length}</span>
+          <span className="section-count">{totalTreeCount}</span>
         </div>
 
-        {children.length === 0 ? (
-          <div className="tree-empty anim-row">
-            <Bot size={18} />
-            <span>이 세션에서 생성된 서브에이전트가 아직 없어요.</span>
+        <div className="agent-tree">
+          <div className="tree-root anim-row">
+            <span className="tree-root-label">이 세션</span>
+            <span className="tree-root-name">
+              {modelName}
+              {effort ? ` · ${effort}` : ''}
+            </span>
           </div>
-        ) : (
-          <div className="agent-tree">
-            <div className="tree-root anim-row">
-              <span className="tree-root-label">이 세션</span>
-              <span className="tree-root-name">
-                {modelName} · {session.title}
-              </span>
+
+          {totalTreeCount === 0 ? (
+            <div className="tree-empty anim-row">
+              <Bot size={18} />
+              <span>이 세션에서 생성된 서브에이전트가 아직 없어요.</span>
             </div>
-            <ul className="tree-children real-children">
-              {children.map((child) => (
-                <li key={child.id}>
-                  <button className="tree-child anim-row" onClick={() => onOpenSession(child.id)}>
-                    <span className="tree-child-name">{child.title}</span>
-                    <span className="tree-child-meta">
-                      {child.summary?.files
-                        ? `${child.summary.files}개 파일 · `
-                        : ''}
-                      {relativeTime(child.time.updated)}
+          ) : (
+            <div className="tree-groups">
+              {(children.length > 0 || coordinatorNodes.length > 0) && (
+                <div className="tree-group">
+                  <div className="tree-group-head">
+                    <span className="tone-square green" />
+                    <span className="tree-group-label">
+                      {coordinatorNodes.length > 0 ? '코디네이터' : '서브에이전트'}
                     </span>
-                    <ChevronRight size={13} className="tree-child-chev" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+                    <span className="tree-group-count">
+                      {children.length + coordinatorNodes.length}
+                    </span>
+                  </div>
+                  <ul className="tree-children">
+                    {coordinatorNodes.map((node) => (
+                      <li key={node.id}>
+                        <button className="tree-child anim-row" onClick={node.onSelect}>
+                          <span className="tree-child-name">{node.name}</span>
+                          <span className="tree-child-meta">
+                            {node.model || node.agent || 'coordinator'}
+                          </span>
+                          {node.inherit && (
+                            <span className="tree-child-meta inherit">· 대화 상속</span>
+                          )}
+                          <ChevronRight size={13} className="tree-child-chev" />
+                        </button>
+                      </li>
+                    ))}
+                    {children.map((child) => (
+                      <li key={child.id}>
+                        <button
+                          className="tree-child anim-row"
+                          onClick={() => onOpenSession(child.id)}
+                        >
+                          <span className="tree-child-name">{child.title}</span>
+                          <span className="tree-child-meta">
+                            {child.summary?.files ? `${child.summary.files}개 파일 · ` : ''}
+                            {relativeTime(child.time.updated)}
+                          </span>
+                          <ChevronRight size={13} className="tree-child-chev" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {workerNodes.length > 0 && (
+                <div className="tree-group">
+                  <div className="tree-group-head">
+                    <span className="tone-square orange" />
+                    <span className="tree-group-label">워커</span>
+                    <span className="tree-group-count">{workerNodes.length}</span>
+                  </div>
+                  <ul className="tree-children">
+                    {workerNodes.map((node) => (
+                      <li key={node.id}>
+                        <button className="tree-child anim-row" onClick={node.onSelect}>
+                          <span className="tree-child-name">{node.name}</span>
+                          <span className="tree-child-meta">
+                            {node.model || node.agent || 'worker'}
+                          </span>
+                          {node.inherit && (
+                            <span className="tree-child-meta inherit">↳ 상속</span>
+                          )}
+                          <ChevronRight size={13} className="tree-child-chev" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {cliNodes.length > 0 && (
+                <div className="tree-group">
+                  <div className="tree-group-head">
+                    <span className="tone-square blue" />
+                    <span className="tree-group-label">외부 CLI</span>
+                    <span className="tree-group-count">{cliNodes.length}</span>
+                  </div>
+                  <ul className="tree-children">
+                    {cliNodes.map((node) => (
+                      <li key={node.id}>
+                        <button className="tree-child anim-row" onClick={node.onSelect}>
+                          <span className="tree-child-name">{node.name}</span>
+                          <span className="tree-child-meta">
+                            {node.model || `${node.agent || 'cli'} CLI`}
+                          </span>
+                          <ChevronRight size={13} className="tree-child-chev" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </section>
 
       <div className="session-foot-note anim-row">

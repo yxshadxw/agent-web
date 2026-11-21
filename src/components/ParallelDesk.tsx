@@ -21,15 +21,22 @@ import {
   ExternalLink,
   FileText,
   FolderPlus,
+  FolderTree,
+  Gauge,
   Github,
   GitBranch,
   GitCommitHorizontal,
+  GitCompareArrows,
+  Info,
   Loader2,
   Menu,
   MessageSquare,
   Minus,
+  MoreHorizontal,
+  PanelRight,
   Play,
   Pause,
+  Pin,
   Plus,
   Power,
   RefreshCw,
@@ -47,8 +54,10 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import type { File as AgentFile, FileDiff } from '@opencode-ai/sdk';
 import { useAgyQuota } from '../hooks/useQuota';
-import { QuotaSection } from './Quota';
+import { QuotaSection, type CodexQuotaSnapshot } from './Quota';
+import { InfoPanel, type TeamTreeAgent } from './InfoPanel';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import {
   orcaApi,
@@ -67,8 +76,9 @@ import {
   type TerminalSnapshot,
   type TranscriptEntry,
   type TranscriptPayload,
+  type WorktreeDiffPayload,
 } from '../lib/orca';
-import { relativeTime, shortPath } from '../data';
+import { relativeTime, shortPath, type InfoTab, type PinnedFile } from '../data';
 import { Sheet } from './Sheet';
 import { SelectMenu } from './SelectMenu';
 
@@ -111,8 +121,37 @@ type ModelOption = { id: string; label: string };
 
 // Model ids are taken from the local agent CLIs. Freebuff does not accept a
 // launch-time model, so it is intentionally absent here.
-const AGY_MODEL_LABEL = (id: string) =>
-  MODEL_OPTIONS.antigravity?.find((m) => m.id === id)?.label || id;
+function resolveModelLabel(
+  id: string,
+  agentType?: string,
+  extraModels: ModelOption[] = [],
+): string {
+  if (!id) return id;
+  const scoped = agentType ? MODEL_OPTIONS[agentType] || [] : [];
+  const allStatic = Object.values(MODEL_OPTIONS).flat();
+  const hit =
+    extraModels.find((m) => m.id === id) ||
+    scoped.find((m) => m.id === id) ||
+    allStatic.find((m) => m.id === id);
+  if (hit) return hit.label;
+  const colonIdx = id.lastIndexOf(':');
+  if (colonIdx > 0) {
+    const baseId = id.slice(0, colonIdx);
+    const eff = id.slice(colonIdx + 1);
+    const baseHit =
+      extraModels.find((m) => m.id === baseId) ||
+      scoped.find((m) => m.id === baseId) ||
+      allStatic.find((m) => m.id === baseId);
+    if (baseHit) {
+      const bare = baseHit.label.replace(/\s*\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i, '').trim();
+      const cap = eff.charAt(0).toUpperCase() + eff.slice(1).toLowerCase();
+      return `${bare} (${cap})`;
+    }
+  }
+  return id;
+}
+
+const AGY_MODEL_LABEL = (id: string) => resolveModelLabel(id);
 
 const MODEL_OPTIONS: Record<string, ModelOption[]> = {
   opencode: [
@@ -316,6 +355,14 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const [openingTerminal, setOpeningTerminal] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [expandedCoords, setExpandedCoords] = useState<Record<string, boolean>>({});
+  const [deskInfoOpen, setDeskInfoOpen] = useState(false);
+  const [deskInfoTab, setDeskInfoTab] = useState<InfoTab>('info');
+  const [deskMenuOpen, setDeskMenuOpen] = useState(false);
+  const deskMenuRef = useRef<HTMLDivElement>(null);
+  const [deskWorktreeDiff, setDeskWorktreeDiff] = useState<WorktreeDiffPayload | null>(null);
+  const [deskPins, setDeskPins] = useState<PinnedFile[]>([]);
+  const [deskCodexQuota, setDeskCodexQuota] = useState<CodexQuotaSnapshot | null>(null);
+  const { quota: deskAgyQuota, loading: deskQuotaLoading, refresh: refreshDeskQuota } = useAgyQuota(deskInfoOpen);
   const toggleCoord = (id: string) =>
     setExpandedCoords((prev) => ({ ...prev, [id]: !prev[id] }));
   const { notice, notify } = useNotice();
@@ -390,6 +437,100 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
     () => overview?.worktrees.find((worktree) => worktree.path === selectedPath) || null,
     [overview, selectedPath],
   );
+
+  useEffect(() => {
+    if (!selectedWorktree?.path) {
+      setDeskPins([]);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`agent-web:desk-pins:${selectedWorktree.path}`);
+      setDeskPins(raw ? (JSON.parse(raw) as PinnedFile[]) : []);
+    } catch {
+      setDeskPins([]);
+    }
+  }, [selectedWorktree?.path]);
+
+  const toggleDeskPin = useCallback(
+    (file: PinnedFile) => {
+      const scope = selectedWorktree?.path || 'desk';
+      setDeskPins((current) => {
+        const exists = current.some((p) => p.path === file.path);
+        const next = exists ? current.filter((p) => p.path !== file.path) : [...current, file];
+        try {
+          localStorage.setItem(`agent-web:desk-pins:${scope}`, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        notify(exists ? '핀을 해제했어요' : '파일을 핀했어요');
+        return next;
+      });
+    },
+    [notify, selectedWorktree?.path],
+  );
+
+  useEffect(() => {
+    if (!deskMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (deskMenuRef.current && !deskMenuRef.current.contains(e.target as Node)) {
+        setDeskMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDeskMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [deskMenuOpen]);
+
+  useEffect(() => {
+    if (!deskInfoOpen && !deskMenuOpen) return;
+    if (!selectedWorktree?.path) return;
+    let alive = true;
+    void orcaApi
+      .worktreeDiff(selectedWorktree.path)
+      .then((res) => {
+        if (alive && res.ok) setDeskWorktreeDiff(res);
+      })
+      .catch(() => undefined);
+    void fetch('/codex-api/quota', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data && (data.primary || data.secondary || data.plan)) {
+          setDeskCodexQuota(data as CodexQuotaSnapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [deskInfoOpen, deskMenuOpen, selectedWorktree?.path]);
+
+  const openDeskInfo = useCallback((nextTab: InfoTab = 'info') => {
+    setDeskInfoTab(nextTab);
+    setDeskInfoOpen(true);
+    setDeskMenuOpen(false);
+  }, []);
+
+  const deskTeamAgents = useMemo<TeamTreeAgent[]>(() => {
+    const list = selectedWorktree?.agents || overview?.agents || [];
+    return list.map((item) => ({
+      id: item.id,
+      name: cleanAgentTitle(item.title),
+      model: `${agentMeta(item.agent).label} CLI`,
+      role: item.role ?? null,
+      agent: item.agent,
+      state: item.state,
+      onSelect: () => {
+        setDeskInfoOpen(false);
+        setLogAgent(item);
+      },
+    }));
+  }, [overview?.agents, selectedWorktree?.agents]);
 
   const openWorktreeTerminal = useCallback(async () => {
     if (!selectedWorktree || openingTerminal) return;
@@ -792,7 +933,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                 <span>{overview?.counts.working || 0}개 에이전트가 움직이는 중</span>
               </div>
             </div>
-            <div className="desk-top-actions">
+            <div className="desk-top-actions" ref={deskMenuRef}>
               <button className="desk-btn ghost" onClick={() => setCreditsOpen(true)}>
                 <Sparkles size={14} />
                 <span>크레딧</span>
@@ -814,6 +955,99 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                 <ArrowLeft size={14} />
                 <span>일반 채팅</span>
               </button>
+              <button
+                type="button"
+                className={`desk-icon ${deskMenuOpen ? 'is-active' : ''}`}
+                onClick={() => setDeskMenuOpen((v) => !v)}
+                aria-label="더 보기"
+                aria-expanded={deskMenuOpen}
+                title="더 보기"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+              <button
+                type="button"
+                className="desk-icon boxed"
+                onClick={() => openDeskInfo('info')}
+                aria-label="정보 패널 열기"
+                title="정보 · 파일 · Diff · Git · Pin"
+              >
+                <PanelRight size={17} />
+              </button>
+              {deskMenuOpen && (
+                <div className="menu-pop desk-menu-pop" role="menu">
+                  <button className="menu-item" role="menuitem" onClick={() => openDeskInfo('info')}>
+                    <span className="menu-ico"><Info size={16} /></span>
+                    <span>정보</span>
+                  </button>
+                  <button className="menu-item" role="menuitem" onClick={() => openDeskInfo('files')}>
+                    <span className="menu-ico"><FolderTree size={16} /></span>
+                    <span>파일</span>
+                    {deskWorktreeDiff?.diffs.length ? (
+                      <span className="menu-badge">{deskWorktreeDiff.diffs.length}</span>
+                    ) : null}
+                  </button>
+                  <button className="menu-item" role="menuitem" onClick={() => openDeskInfo('diff')}>
+                    <span className="menu-ico"><GitCompareArrows size={16} /></span>
+                    <span>Diff</span>
+                    {deskWorktreeDiff?.diffs.length ? (
+                      <span className="menu-badge">{deskWorktreeDiff.diffs.length}</span>
+                    ) : null}
+                  </button>
+                  <button className="menu-item" role="menuitem" onClick={() => openDeskInfo('git')}>
+                    <span className="menu-ico"><GitBranch size={16} /></span>
+                    <span>Git</span>
+                  </button>
+                  <button className="menu-item" role="menuitem" onClick={() => openDeskInfo('pin')}>
+                    <span className="menu-ico"><Pin size={16} /></span>
+                    <span>Pin</span>
+                    {deskPins.length ? <span className="menu-badge">{deskPins.length}</span> : null}
+                  </button>
+                  <button className="menu-item with-sep" role="menuitem" onClick={() => openDeskInfo('info')}>
+                    <span className="menu-ico"><Gauge size={16} /></span>
+                    <span>컨텍스트</span>
+                  </button>
+                  <button
+                    className="menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setDeskMenuOpen(false);
+                      setCreditsOpen(true);
+                    }}
+                  >
+                    <span className="menu-ico"><Activity size={16} /></span>
+                    <span>사용량 한도</span>
+                  </button>
+                  <button
+                    className="menu-item with-sep"
+                    role="menuitem"
+                    disabled={!selectedWorktree || openingTerminal}
+                    onClick={() => {
+                      setDeskMenuOpen(false);
+                      void openWorktreeTerminal();
+                    }}
+                  >
+                    <span className="menu-ico"><Plus size={16} /></span>
+                    <span>새 셸 터미널</span>
+                  </button>
+                  <button
+                    className="menu-item"
+                    role="menuitem"
+                    disabled={!selectedWorktree}
+                    onClick={() => {
+                      setDeskMenuOpen(false);
+                      if (!selectedWorktree) return;
+                      void navigator.clipboard.writeText(selectedWorktree.path).then(
+                        () => notify('워크트리 경로를 복사했어요'),
+                        () => notify('복사할 수 없어요'),
+                      );
+                    }}
+                  >
+                    <span className="menu-ico"><Copy size={16} /></span>
+                    <span>워크트리 경로 복사</span>
+                  </button>
+                </div>
+              )}
             </div>
           </header>
 
@@ -938,8 +1172,82 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
           onClose={() => setLogAgent(null)}
           onOverview={setOverview}
           onContinue={setLogAgent}
+          onOpenInfo={openDeskInfo}
         />
       )}
+      <InfoPanel
+        open={deskInfoOpen}
+        tab={deskInfoTab}
+        onTab={setDeskInfoTab}
+        onClose={() => setDeskInfoOpen(false)}
+        session={
+          selectedWorktree
+            ? {
+                id: logAgent?.orcaSessionId || logAgent?.terminalHandle || selectedWorktree.id,
+                title: logAgent
+                  ? cleanAgentTitle(logAgent.title)
+                  : formatWorktreeName(selectedWorktree),
+                directory: selectedWorktree.path,
+                agent: logAgent?.agent || 'orca',
+                time: {
+                  created:
+                    logAgent?.updatedAt || selectedWorktree.lastActivityAt || Date.now(),
+                  updated:
+                    logAgent?.updatedAt || selectedWorktree.lastActivityAt || Date.now(),
+                },
+                version: '1',
+                projectID: selectedWorktree.repoId || selectedWorktree.repo,
+              }
+            : null
+        }
+        parentSession={null}
+        messages={[]}
+        diffs={(deskWorktreeDiff?.diffs || []) as FileDiff[]}
+        children={[]}
+        gitFiles={(deskWorktreeDiff?.files || []) as AgentFile[]}
+        vcs={
+          deskWorktreeDiff?.branch || selectedWorktree?.branch
+            ? {
+                branch: deskWorktreeDiff?.branch || selectedWorktree?.branch,
+                default_branch: 'main',
+              }
+            : null
+        }
+        pathInfo={
+          selectedWorktree
+            ? {
+                state: '',
+                config: '',
+                worktree: selectedWorktree.path,
+                directory: selectedWorktree.path,
+              }
+            : null
+        }
+        providers={logAgent ? agentMeta(logAgent.agent).label : 'Orca'}
+        modelName={
+          logAgent
+            ? resolveModelLabel(
+                (logAgent.orcaSessionId &&
+                  localStorage.getItem(`agyModel:${logAgent.orcaSessionId}`)) ||
+                  '',
+                logAgent.agent,
+              ) || agentMeta(logAgent.agent).label
+            : selectedWorktree
+              ? formatWorktreeName(selectedWorktree)
+              : '워크트리'
+        }
+        contextLimit={200_000}
+        activeEngine={logAgent?.agent || 'agy'}
+        codexQuota={deskCodexQuota}
+        teamAgents={deskTeamAgents}
+        quota={deskAgyQuota}
+        quotaLoading={deskQuotaLoading}
+        onRefreshQuota={refreshDeskQuota}
+        pinned={deskPins}
+        onTogglePin={toggleDeskPin}
+        onOpenSession={() => undefined}
+        onToast={notify}
+      />
       {creditsOpen && (
         <CreditsDrawer overview={overview} onClose={() => setCreditsOpen(false)} />
       )}
@@ -2979,7 +3287,7 @@ function AgyChatThread({
       {busy && (
         <div className="desk-agy-working">
           <Loader2 size={14} className="spin" />
-          <span>생각하는 중…</span>
+          <span>작업 중…</span>
         </div>
       )}
       <div className="msg-meta desk-agy-meta">
@@ -3206,6 +3514,7 @@ function LogDrawer({
   onClose,
   onOverview,
   onContinue,
+  onOpenInfo,
 }: {
   agent: OrcaAgent;
   overview: OrcaOverview | null;
@@ -3213,6 +3522,7 @@ function LogDrawer({
   onClose: () => void;
   onOverview: (overview: OrcaOverview) => void;
   onContinue: (agent: OrcaAgent) => void;
+  onOpenInfo?: (tab?: InfoTab) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TerminalSnapshot | null>(null);
   const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
@@ -3275,9 +3585,26 @@ function LogDrawer({
       (!agent.terminalHandle && Boolean(agent.orcaSessionId)));
   const isAgy = agent.agent === 'antigravity';
   const isCodex = agent.agent === 'codex';
+  const isClaude = agent.agent === 'claude';
   const isAgyChat = isChat && isAgy;
   const canPickModel = isAgyChat || isCodex || (MODEL_OPTIONS[agent.agent]?.length ?? 0) > 0;
-  const { quota: agyQuota, loading: agyQuotaLoading, refresh: refreshAgyQuota } = useAgyQuota(isAgy);
+  const { quota: agyQuota, loading: agyQuotaLoading, refresh: refreshAgyQuota } = useAgyQuota(isAgy || isClaude || isCodex);
+  const [codexDrawerQuota, setCodexDrawerQuota] = useState<CodexQuotaSnapshot | null>(null);
+  useEffect(() => {
+    if (!isCodex && !isClaude) return;
+    let alive = true;
+    void fetch('/codex-api/quota', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data && (data.primary || data.secondary || data.plan)) {
+          setCodexDrawerQuota(data as CodexQuotaSnapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [isCodex, isClaude]);
   const displayMeta = isOpenCode
     ? { id: 'opencode', label: 'OpenCode', short: 'OC', cls: 'opencode' }
     : isFreebuff
@@ -3383,24 +3710,27 @@ function LogDrawer({
     };
   }, [isAgy, agyScreen.model]);
   const [agyModelOverride, setAgyModelOverride] = useState<string | null>(null);
+  const [liveDrawerModels, setLiveDrawerModels] = useState<ModelOption[]>([]);
   useEffect(() => {
     setAgyModelOverride(null);
   }, [agent.id, agent.orcaSessionId]);
   const pickedAgyModel = agyModelOverride || (agent.orcaSessionId
     ? localStorage.getItem(`agyModel:${agent.orcaSessionId}`)
     : null);
-  const pickedLabel = pickedAgyModel ? AGY_MODEL_LABEL(pickedAgyModel) : null;
-  const pickedEffort = pickedLabel?.match(/\((\w+)\)\s*$/)?.[1]?.toLowerCase();
+  const pickedLabel = pickedAgyModel
+    ? resolveModelLabel(pickedAgyModel, agent.agent, liveDrawerModels)
+    : null;
+  const pickedEffort = pickedLabel?.match(/\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i)?.[1]?.toLowerCase();
   const agyModelLabel =
-    pickedLabel?.replace(/\s*\(\w+\)\s*$/, '') ||
+    pickedLabel?.replace(/\s*\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i, '').trim() ||
     agyScreen.model ||
     (!isAgyChat && isAgy ? agyDefault?.model : null) ||
-    (isCodex ? 'GPT-6 Luna' : isAgy ? '모델' : displayMeta.label);
+    (isCodex ? 'GPT-6 Luna' : isClaude ? 'Claude Opus 4.6' : isAgy ? '모델' : displayMeta.label);
   const agyEffortLabel =
     pickedEffort ||
     agyScreen.effort ||
     (!isAgyChat && isAgy ? agyDefault?.effort : null) ||
-    (isCodex ? 'medium' : 'effort');
+    (isCodex || isClaude ? 'medium' : 'effort');
   // A chat stays a chat even if Orca also exposes a terminal handle for it.
   const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking = transcript ? transcript.state === 'working' : agent.state === 'working';
@@ -3513,7 +3843,6 @@ function LogDrawer({
     [agent, displayTail, freebuffSessionEntries, isFreebuff, transcriptEntries],
   );
   const [agyPickerMode, setAgyPickerMode] = useState<'model' | 'effort' | null>(null);
-  const [liveDrawerModels, setLiveDrawerModels] = useState<ModelOption[]>([]);
   useEffect(() => {
     if (!agyPickerMode) return;
     let alive = true;
@@ -4176,6 +4505,16 @@ function LogDrawer({
                 {closing ? <Loader2 size={15} className="spin" /> : <Power size={15} />}
               </button>
             )}
+            {onOpenInfo && (
+              <button
+                className="desk-icon"
+                onClick={() => onOpenInfo('info')}
+                title="정보 · 파일 · Diff · Git · Pin"
+                aria-label="정보 패널 열기"
+              >
+                <PanelRight size={15} />
+              </button>
+            )}
             <button
               className="desk-icon"
               onClick={onClose}
@@ -4730,13 +5069,13 @@ function LogDrawer({
             onDragLeave={() => setDragActive(false)}
             onDrop={dropFile}
           >
-            <div className={`desk-freebuff-compose-shell ${(agyPickerOpen || agyUsageOpen) && (canPickModel || isAgyChat) ? 'is-expanded' : ''}`}>
+            <div className={`desk-freebuff-compose-shell ${(agyPickerOpen || agyUsageOpen) && (canPickModel || isAgyChat || isCodex || isClaude) ? 'is-expanded' : ''}`}>
             <div
-              className={`desk-inline-expand ${agyUsageOpen && isAgyChat ? 'open' : ''}`}
-              aria-hidden={!(agyUsageOpen && isAgyChat)}
+              className={`desk-inline-expand ${agyUsageOpen && (isAgyChat || isCodex || isClaude) ? 'open' : ''}`}
+              aria-hidden={!(agyUsageOpen && (isAgyChat || isCodex || isClaude))}
             >
               <div className="desk-inline-expand-inner">
-                <div className="inline-panel desk-freebuff-inline-panel desk-agy-usage-panel" role="region" aria-label="Agy 사용량">
+                <div className="inline-panel desk-freebuff-inline-panel desk-agy-usage-panel" role="region" aria-label="사용량 한도">
                   <div className="inline-panel-scroll" style={{ maxHeight: 'min(62vh, 440px)', overflowY: 'auto' }}>
                     <section className="desk-freebuff-usage usage-sheet">
                       <div className="sheet-head">
@@ -4746,7 +5085,7 @@ function LogDrawer({
                           type="button"
                           className="sheet-close"
                           onClick={() => setAgyUsageOpen(false)}
-                          aria-label="Agy 사용량 패널 닫기"
+                          aria-label="사용량 패널 닫기"
                         >
                           <X size={15} />
                         </button>
@@ -4755,6 +5094,8 @@ function LogDrawer({
                         quota={agyQuota}
                         loading={agyQuotaLoading}
                         onRefresh={() => void refreshAgyQuota()}
+                        codexQuota={codexDrawerQuota}
+                        activeEngine={agent.agent}
                       />
                     </section>
                   </div>
@@ -4786,22 +5127,34 @@ function LogDrawer({
                             lbl.match(/\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i)?.[1] || '';
 
                           if (agyPickerMode === 'effort') {
+                            const pickedBaseLabel = pickedAgyModel
+                              ? stripEffort(resolveModelLabel(pickedAgyModel, agent.agent, allModels))
+                              : '';
+                            const targetBase = (pickedBaseLabel || agyModelLabel).toLowerCase();
                             const matching = allModels.filter(
-                              (m) => stripEffort(m.label) === agyModelLabel || (pickedAgyModel && stripEffort(AGY_MODEL_LABEL(pickedAgyModel)) === stripEffort(m.label)),
+                              (m) => stripEffort(m.label).toLowerCase() === targetBase,
                             );
-                            const effortItems = (matching.length > 0 ? matching : allModels).filter((m) => extractEffort(m.label));
-                            const list = effortItems.length > 0
-                              ? effortItems
-                              : [
-                                  { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:low`, label: `${agyModelLabel} (Low)` },
-                                  { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:medium`, label: `${agyModelLabel} (Medium)` },
-                                  { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:high`, label: `${agyModelLabel} (High)` },
-                                ];
+                            const rawEffortItems = (matching.length > 0 ? matching : allModels).filter((m) =>
+                              extractEffort(m.label),
+                            );
+                            // Deduplicate by normalized effort name so fallback never shows repeats or double selection.
+                            const dedupMap = new Map<string, ModelOption>();
+                            for (const item of rawEffortItems) {
+                              const key = extractEffort(item.label).toLowerCase();
+                              if (key && !dedupMap.has(key)) dedupMap.set(key, item);
+                            }
+                            const effortItems = [...dedupMap.values()];
+                            const list =
+                              effortItems.length > 0
+                                ? effortItems
+                                : [
+                                    { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:low`, label: `${agyModelLabel} (Low)` },
+                                    { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:medium`, label: `${agyModelLabel} (Medium)` },
+                                    { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:high`, label: `${agyModelLabel} (High)` },
+                                  ];
                             return list.map((item) => {
                               const eff = extractEffort(item.label) || item.label;
-                              const selected =
-                                (pickedAgyModel && pickedAgyModel === item.id) ||
-                                agyEffortLabel.toLowerCase() === eff.toLowerCase();
+                              const selected = agyEffortLabel.toLowerCase() === eff.toLowerCase();
                               return (
                                 <button
                                   type="button"
@@ -4825,7 +5178,7 @@ function LogDrawer({
                           }
                           return [...seen.entries()].map(([baseName, variants]) => {
                             const selected =
-                              agyModelLabel === baseName ||
+                              agyModelLabel.toLowerCase() === baseName.toLowerCase() ||
                               variants.some((v) => v.id === pickedAgyModel);
                             const preferred =
                               variants.find((v) => extractEffort(v.label).toLowerCase() === agyEffortLabel.toLowerCase()) ||
@@ -4840,6 +5193,7 @@ function LogDrawer({
                                 onClick={() => void switchAgyModel(preferred.id)}
                               >
                                 <span className="model-name">{baseName}</span>
+                                <span className="row-provider">{displayMeta.label}</span>
                               </button>
                             );
                           });
@@ -4950,7 +5304,7 @@ function LogDrawer({
                 type="button"
                 className={`tb-item timer ${agyUsageOpen ? 'is-open' : ''}`}
                 onClick={() => {
-                  if (!isAgyChat) return;
+                  if (!isAgyChat && !isCodex && !isClaude) return;
                   setAgyPickerOpen(false);
                   setAgyUsageOpen((open) => !open);
                 }}
@@ -4958,18 +5312,38 @@ function LogDrawer({
                 title={
                   isAgyChat
                     ? `${agyModelLabel} · ${agyUsageText}${agyTimeLabel ? ` · ${agyTimeLabel} 후 리셋` : ''}`
-                    : displayMeta.label
+                    : `${displayMeta.label} 사용량 보기`
                 }
               >
-                <span
-                  className="timer-ring"
-                  style={{
-                    background: `conic-gradient(#e08a4c 0 ${agyRemainingPct}%, #2a211b ${agyRemainingPct}% 360deg)`,
-                  }}
-                />
-                <span>
-                  {isAgyChat ? agyRemainingLabel : isChat ? '채팅' : '실시간'}
-                </span>
+                {(() => {
+                  const codexMinPct = (() => {
+                    const wins = [codexDrawerQuota?.primary, codexDrawerQuota?.secondary].filter(
+                      (w): w is NonNullable<CodexQuotaSnapshot['primary']> =>
+                        Boolean(w && typeof w.usedPercent === 'number'),
+                    );
+                    if (!wins.length) return null;
+                    return Math.max(0, Math.min(...wins.map((w) => Math.round(100 - w.usedPercent))));
+                  })();
+                  const ringPct = isAgyChat ? agyRemainingPct : codexMinPct ?? 0;
+                  const ringLabel = isAgyChat
+                    ? agyRemainingLabel
+                    : codexMinPct !== null
+                      ? `${codexMinPct}%`
+                      : isChat
+                        ? '채팅'
+                        : '실시간';
+                  return (
+                    <>
+                      <span
+                        className="timer-ring"
+                        style={{
+                          background: `conic-gradient(#e08a4c 0 ${ringPct}%, #2a211b ${ringPct}% 360deg)`,
+                        }}
+                      />
+                      <span>{ringLabel}</span>
+                    </>
+                  );
+                })()}
               </button>
             </div>
             {sendError && (

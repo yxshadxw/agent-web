@@ -127,7 +127,7 @@ export function Composer({
   const completed = todos.filter((todo) => todo.status === 'completed').length;
   const inProgress = todos.find((todo) => todo.status === 'in_progress');
   const allDone = todos.length > 0 && completed === todos.length;
-  const todoTitle = inProgress?.content || (allDone ? '모두 괜찮아요' : '할 일');
+  const todoTitle = inProgress?.content || (allDone ? '모두 끝났어요' : '할 일');
 
   const addFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;

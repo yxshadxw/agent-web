@@ -188,6 +188,16 @@ export type GithubInfo = {
   fetchedAt?: string;
 };
 
+export type WorktreeDiffPayload = {
+  ok: boolean;
+  path?: string;
+  branch?: string;
+  files: { path: string; added: number; removed: number; status: 'added' | 'deleted' | 'modified' }[];
+  diffs: { file: string; before: string; after: string; additions: number; deletions: number }[];
+  error?: string;
+  fetchedAt?: string;
+};
+
 export type InstructionsInfo = {
   ok: boolean;
   path: string;
@@ -373,6 +383,8 @@ export const orcaApi = {
     }),
   github: (path: string) =>
     request<GithubInfo>(`/github?path=${encodeURIComponent(path)}`),
+  worktreeDiff: (path: string) =>
+    request<WorktreeDiffPayload>(`/worktree/diff?path=${encodeURIComponent(path)}`),
   runWorkflow: (path: string, workflowId: number, ref: string) =>
     request<{ ok: boolean; message: string; error?: string }>('/github/run', {
       method: 'POST',

@@ -14,8 +14,22 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const extraPathDirs = [
+  join(homedir(), '.config', 'orca', 'cli', 'bin'),
+  join(homedir(), '.local', 'bin'),
+  join(homedir(), '.npm-global', 'bin'),
+].filter((dir) => existsSync(dir));
+if (extraPathDirs.length) {
+  process.env.PATH = [...extraPathDirs, process.env.PATH || ''].filter(Boolean).join(':');
+}
 const PORT = Number(process.env.ORCA_BRIDGE_PORT || 4099);
-const ORCA_BIN = process.env.ORCA_BIN || 'orca';
+const ORCA_BIN =
+  process.env.ORCA_BIN ||
+  [
+    join(homedir(), '.config', 'orca', 'cli', 'bin', 'orca'),
+    join(homedir(), '.local', 'bin', 'orca'),
+  ].find((candidate) => existsSync(candidate)) ||
+  'orca';
 const CREDENTIALS_PATH =
   process.env.FREEBUFF_CREDENTIALS ||
   join(homedir(), '.config', 'manicode', 'credentials.json');
@@ -645,6 +659,114 @@ async function githubInfo(worktree) {
     latestRun: Array.isArray(runs) && runs.length ? runs[0] : null,
     workflows: Array.isArray(workflows) ? workflows : [],
     path: worktree.path,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+function readWorktreeText(absPath, maxBytes = 32_768) {
+  try {
+    const stat = statSync(absPath);
+    if (!stat.isFile()) return '';
+    const buf = readFileSync(absPath);
+    if (buf.subarray(0, 512).includes(0)) return '';
+    return buf.subarray(0, maxBytes).toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+async function worktreeFilesAndDiffs(worktree) {
+  const cwd = worktree.path;
+  const [branchResult, statusResult, numstatResult] = await Promise.all([
+    runCommand('git', ['branch', '--show-current'], { cwd, timeout: 10_000 }).catch(() => ({
+      stdout: '',
+    })),
+    runCommand('git', ['status', '--porcelain=v1', '-uall'], { cwd, timeout: 12_000 }).catch(
+      () => ({ stdout: '' }),
+    ),
+    runCommand('git', ['diff', 'HEAD', '--numstat'], { cwd, timeout: 12_000 }).catch(() =>
+      runCommand('git', ['diff', '--numstat'], { cwd, timeout: 12_000 }).catch(() => ({
+        stdout: '',
+      })),
+    ),
+  ]);
+
+  const branch = branchResult.stdout.trim() || worktree.branch || 'HEAD';
+  const statMap = new Map();
+  for (const line of (numstatResult.stdout || '').split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    const added = Number.parseInt(parts[0], 10);
+    const removed = Number.parseInt(parts[1], 10);
+    const filePath = parts.slice(2).join('\t').trim();
+    statMap.set(filePath, {
+      added: Number.isFinite(added) ? added : 0,
+      removed: Number.isFinite(removed) ? removed : 0,
+    });
+  }
+
+  const files = [];
+  const diffs = [];
+  const statusLines = (statusResult.stdout || '')
+    .split('\n')
+    .filter((line) => line.length >= 4)
+    .slice(0, 40);
+
+  for (const line of statusLines) {
+    const xy = line.slice(0, 2);
+    let filePath = line.slice(3).trim();
+    if (filePath.includes(' -> ')) {
+      filePath = filePath.split(' -> ').pop().trim();
+    }
+    if (filePath.startsWith('"') && filePath.endsWith('"')) {
+      filePath = filePath.slice(1, -1);
+    }
+    const status =
+      xy === '??'
+        ? 'added'
+        : xy.includes('D')
+          ? 'deleted'
+          : xy.includes('A')
+            ? 'added'
+            : 'modified';
+    const counts = statMap.get(filePath) || { added: 0, removed: 0 };
+    const absPath = join(cwd, filePath);
+    const after = status === 'deleted' ? '' : readWorktreeText(absPath);
+    let before = '';
+    if (status !== 'added') {
+      const headRes = await runCommand('git', ['show', `HEAD:${filePath}`], {
+        cwd,
+        timeout: 8_000,
+      }).catch(() => ({ stdout: '' }));
+      before = (headRes.stdout || '').slice(0, 32_768);
+    }
+    const additions =
+      counts.added || (status === 'added' && after ? after.split('\n').length : 0);
+    const deletions =
+      counts.removed || (status === 'deleted' && before ? before.split('\n').length : 0);
+
+    files.push({
+      path: filePath,
+      added: additions,
+      removed: deletions,
+      status,
+    });
+    diffs.push({
+      file: filePath,
+      before,
+      after,
+      additions,
+      deletions,
+    });
+  }
+
+  return {
+    ok: true,
+    path: cwd,
+    branch,
+    files,
+    diffs,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -2319,6 +2441,16 @@ async function route(req, res) {
       json(res, 200, await githubInfo(worktree));
     } catch (error) {
       json(res, 502, { ok: false, connected: false, error: errorMessage(error) });
+    }
+    return;
+  }
+
+  if (method === 'GET' && path === '/worktree/diff') {
+    try {
+      const worktree = await resolveWorktreePath(url.searchParams.get('path'));
+      json(res, 200, await worktreeFilesAndDiffs(worktree));
+    } catch (error) {
+      json(res, 502, { ok: false, files: [], diffs: [], error: errorMessage(error) });
     }
     return;
   }

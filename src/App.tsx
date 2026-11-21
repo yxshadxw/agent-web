@@ -5,15 +5,16 @@ import { Header } from './components/Header';
 import { Timeline } from './components/Timeline';
 import { Composer, type Attachment } from './components/Composer';
 import { AutoList, ContextSheet, ModelList, ReasonList, UsageSheet, type UnifiedModelGroup } from './components/Sheets';
-import { InfoPanel } from './components/InfoPanel';
+import { InfoPanel, type TeamTreeAgent } from './components/InfoPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ParallelDesk } from './components/ParallelDesk';
-import { CodexPanel } from './components/CodexPanel';
+import { CodexPanel, type CodexPanelState } from './components/CodexPanel';
 import { Sidebar } from './components/Sidebar';
 import { BrandGlyph } from './components/Brand';
 import { useAgent } from './hooks/useAgent';
 import { useAgyQuota } from './hooks/useQuota';
 import { engineLabel, getEngine, switchEngine } from './lib/engine';
+import { orcaApi, type WorktreeDiffPayload } from './lib/orca';
 import { useAppSettings } from './lib/preferences';
 import {
   api,
@@ -34,6 +35,15 @@ import {
 
 const PIN_KEY = (sessionID: string) => `agent-web:pins:${sessionID}`;
 const DESK_OPEN_KEY = 'agent-web:desk-open:v1';
+const CODEX_TITLE_KEY = 'agent-web:codex-title:v1';
+
+function loadCodexTitle(): string {
+  try {
+    return localStorage.getItem(CODEX_TITLE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
 
 function loadDeskOpen(): boolean {
   try {
@@ -65,13 +75,18 @@ export default function App() {
   const prefs = useAppSettings();
   const engine = getEngine();
   const codexMode = engine === 'codex';
-  const quotaState = useAgyQuota(agent.auth === 'ok' && engine === 'agy');
+  const quotaState = useAgyQuota(agent.auth === 'ok');
   const [panel, setPanel] = useState<ComposerPanel>(null);
   const [deskOpen, setDeskOpen] = useState(loadDeskOpen);
   const [codexOpen, setCodexOpen] = useState(false);
   const [codexStatsOpen, setCodexStatsOpen] = useState(false);
   const [codexResetKey, setCodexResetKey] = useState(0);
+  const [codexTitle, setCodexTitle] = useState(loadCodexTitle);
+  const [codexState, setCodexState] = useState<CodexPanelState | null>(null);
+  const [teamAgents, setTeamAgents] = useState<TeamTreeAgent[]>([]);
+  const [worktreeDiff, setWorktreeDiff] = useState<WorktreeDiffPayload | null>(null);
   const codexScreen = codexMode || codexOpen;
+  const pinScope = codexScreen ? 'codex-chat' : agent.sessionID;
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<InfoTab>('info');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -161,8 +176,47 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setPins(loadPins(agent.sessionID));
-  }, [agent.sessionID]);
+    setPins(loadPins(pinScope));
+  }, [pinScope]);
+
+  useEffect(() => {
+    if (!infoOpen) return;
+    let alive = true;
+    const workDir = agent.session?.directory || agent.pathInfo?.worktree || '';
+    void orcaApi
+      .overview(false)
+      .then((overview) => {
+        if (!alive) return;
+        const agentsList = (overview.agents || [])
+          .filter((item) => !workDir || item.path === workDir || item.repo === baseName(workDir))
+          .slice(0, 12)
+          .map((item) => ({
+            id: item.id,
+            name: item.title || item.agent,
+            model: `${item.agent} CLI`,
+            role: item.role ?? null,
+            agent: item.agent,
+            state: item.state,
+            onSelect: () => {
+              setInfoOpen(false);
+              setDeskOpen(true);
+            },
+          }));
+        setTeamAgents(agentsList);
+      })
+      .catch(() => undefined);
+    if (codexScreen && workDir) {
+      void orcaApi
+        .worktreeDiff(workDir)
+        .then((res) => {
+          if (alive && res.ok) setWorktreeDiff(res);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [agent.pathInfo?.worktree, agent.session?.directory, codexScreen, infoOpen]);
 
   useEffect(() => {
     if (!agent.busy) return;
@@ -345,6 +399,17 @@ export default function App() {
     setSidebarOpen(false);
     setSettingsOpen(false);
     setPanel(null);
+    if (codexScreen) {
+      setCodexTitle('');
+      try {
+        localStorage.removeItem(CODEX_TITLE_KEY);
+      } catch {
+        // ignore
+      }
+      setCodexResetKey((value) => value + 1);
+      showToast('새 세션을 시작했어요');
+      return;
+    }
     setCodexResetKey((value) => value + 1);
     try {
       await agent.createSession();
@@ -353,10 +418,24 @@ export default function App() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : '세션을 만들지 못했어요');
     }
-  }, [agent, showToast]);
+  }, [agent, codexScreen, showToast]);
 
   const deleteSession = useCallback(
-    async (target: AgentSession) => {
+    async (target: AgentSession | null) => {
+      if (codexScreen) {
+        if (!window.confirm('현재 Codex 대화 기록을 비울까요?')) return;
+        setCodexTitle('');
+        try {
+          localStorage.removeItem(CODEX_TITLE_KEY);
+        } catch {
+          // ignore
+        }
+        setCodexResetKey((value) => value + 1);
+        setInfoOpen(false);
+        showToast('대화를 비웠어요');
+        return;
+      }
+      if (!target) return;
       const agy = getEngine() === 'agy';
       const question = agy
         ? `"${target.title}" 세션을 목록에서 숨길까요? Agy 기록은 유지됩니다.`
@@ -371,10 +450,24 @@ export default function App() {
         showToast(err instanceof Error ? err.message : '세션을 삭제하지 못했어요');
       }
     },
-    [agent, showToast],
+    [agent, codexScreen, showToast],
   );
 
   const renameSession = useCallback(async () => {
+    if (codexScreen) {
+      const current = codexTitle || 'Codex 채팅';
+      const title = window.prompt('새 세션 타이틀', current);
+      if (!title || !title.trim() || title.trim() === current) return;
+      const clean = title.trim();
+      setCodexTitle(clean);
+      try {
+        localStorage.setItem(CODEX_TITLE_KEY, clean);
+      } catch {
+        // ignore
+      }
+      showToast('타이틀을 변경했어요');
+      return;
+    }
     if (!session) return;
     const title = window.prompt('새 세션 타이틀', session.title);
     if (!title || !title.trim() || title.trim() === session.title) return;
@@ -386,17 +479,21 @@ export default function App() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : '타이틀을 변경하지 못했어요');
     }
-  }, [agent, session, showToast]);
+  }, [agent, codexScreen, codexTitle, session, showToast]);
 
   const copyId = useCallback(async () => {
-    if (!session) return;
+    const id = codexScreen ? codexState?.threadId : session?.id;
+    if (!id) {
+      showToast(codexScreen ? '먼저 메시지를 보내면 스레드 ID가 생성돼요' : '복사할 세션 ID가 없어요');
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(session.id);
+      await navigator.clipboard.writeText(id);
       showToast('세션 ID를 복사했어요');
     } catch {
       showToast('복사할 수 없어요');
     }
-  }, [session, showToast]);
+  }, [codexScreen, codexState?.threadId, session, showToast]);
 
   const handleSend = useCallback(
     (text: string, files: Attachment[]) => {
@@ -439,7 +536,7 @@ export default function App() {
 
   const togglePin = useCallback(
     (file: PinnedFile) => {
-      if (!agent.sessionID) {
+      if (!pinScope) {
         showToast('세션을 먼저 열어주세요');
         return;
       }
@@ -448,12 +545,12 @@ export default function App() {
         const next = exists
           ? current.filter((pin) => pin.path !== file.path)
           : [...current, file];
-        savePins(agent.sessionID, next);
+        savePins(pinScope, next);
         showToast(exists ? '핀을 해제했어요' : '파일을 핀했어요');
         return next;
       });
     },
-    [agent.sessionID, showToast],
+    [pinScope, showToast],
   );
 
   const pickModel = useCallback(
@@ -622,20 +719,18 @@ export default function App() {
       <div className="phone">
         <Header
           session={session}
+          titleOverride={codexScreen ? codexTitle || 'Codex 채팅' : undefined}
+          canManageSession={codexScreen || Boolean(session)}
           pathInfo={agent.pathInfo}
-          diffCount={agent.diffs.length}
+          diffCount={codexScreen && worktreeDiff ? worktreeDiff.diffs.length : agent.diffs.length}
           onMenu={() => setSidebarOpen(true)}
           engineOverride={codexOpen && !codexMode ? 'codex' : undefined}
           onOpenInfo={(tab) => {
-            if (codexScreen) {
-              setCodexStatsOpen(true);
-              return;
-            }
             openInfo(tab);
           }}
           onOpenPanel={(kind) => {
             if (codexScreen) {
-              setCodexStatsOpen(true);
+              setCodexStatsOpen((current) => !current);
               return;
             }
             setPanel((current) => (current === kind ? null : kind));
@@ -651,7 +746,7 @@ export default function App() {
             setCodexOpen((value) => !value);
           }}
           onRename={() => void renameSession()}
-          onDelete={() => session && void deleteSession(session)}
+          onDelete={() => void deleteSession(session)}
           onCopyId={() => void copyId()}
         />
 
@@ -661,6 +756,8 @@ export default function App() {
             onClose={codexMode ? undefined : () => setCodexOpen(false)}
             statsOpen={codexStatsOpen}
             onStatsOpen={setCodexStatsOpen}
+            onOpenInfo={() => openInfo('info')}
+            onStateChange={setCodexState}
             resetKey={codexResetKey}
           />
         ) : (
@@ -730,17 +827,51 @@ export default function App() {
         tab={infoTab}
         onTab={setInfoTab}
         onClose={() => setInfoOpen(false)}
-        session={session}
-        parentSession={parentSession}
-        messages={agent.messages}
-        diffs={agent.diffs}
-        children={agent.children}
-        gitFiles={agent.gitFiles}
-        vcs={agent.vcs}
+        session={
+          codexScreen
+            ? {
+                id: codexState?.threadId || 'codex-local',
+                title: codexTitle || 'Codex 채팅',
+                directory: agent.session?.directory || agent.pathInfo?.worktree || '',
+                agent: 'codex',
+                time: {
+                  created: session?.time.created || Date.now(),
+                  updated: Date.now(),
+                },
+                version: '1',
+                projectID: session?.projectID || 'codex',
+              }
+            : session
+        }
+        parentSession={codexScreen ? null : parentSession}
+        messages={codexScreen ? [] : agent.messages}
+        diffs={codexScreen && worktreeDiff ? worktreeDiff.diffs : agent.diffs}
+        children={codexScreen ? [] : agent.children}
+        gitFiles={codexScreen && worktreeDiff ? worktreeDiff.files : agent.gitFiles}
+        vcs={
+          codexScreen && worktreeDiff?.branch
+            ? { branch: worktreeDiff.branch, default_branch: agent.vcs?.default_branch }
+            : agent.vcs
+        }
         pathInfo={agent.pathInfo}
-        providers={providerName}
-        modelName={modelName}
-        contextLimit={contextLimit}
+        providers={codexScreen ? 'OpenAI / Claude CLI' : providerName}
+        modelName={codexScreen ? codexState?.modelLabel || 'GPT-6 Luna' : modelName}
+        effort={codexScreen ? codexState?.effort : agent.model.variant}
+        contextLimit={codexScreen ? codexState?.usage?.contextWindow || 272_000 : contextLimit}
+        contextUsed={codexScreen ? codexState?.usage?.context || 0 : undefined}
+        tokenOverride={
+          codexScreen && codexState?.usage
+            ? {
+                input: codexState.usage.input,
+                output: codexState.usage.output,
+                reasoning: codexState.usage.reasoning,
+                cache: { read: codexState.usage.cached, write: 0 },
+              }
+            : undefined
+        }
+        activeEngine={codexScreen ? 'codex' : engine}
+        codexQuota={codexState?.quota ?? undefined}
+        teamAgents={teamAgents}
         quota={quotaState.quota}
         quotaLoading={quotaState.loading}
         onRefreshQuota={quotaState.refresh}

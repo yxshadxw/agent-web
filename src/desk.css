@@ -660,6 +660,23 @@
   align-items: center;
   gap: 5px;
   flex: none;
+  position: relative;
+}
+
+.desk-menu-pop {
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 160;
+}
+
+.desk-icon.boxed {
+  border: 1px solid #2a2a31;
+  background: #17171b;
+}
+
+.desk-icon.is-active {
+  background: #232328;
+  color: #f4f1ec;
 }
 
 .desk-icon {

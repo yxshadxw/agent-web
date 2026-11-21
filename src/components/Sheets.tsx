@@ -285,6 +285,7 @@ export function UsageSheet({
         quota={quota}
         loading={quotaLoading}
         onRefresh={onRefreshQuota}
+        activeEngine={typeof window !== 'undefined' ? (localStorage.getItem('agent-web:engine') || 'agy') : 'agy'}
       />
       <div className="usage-divider">
         <span>이 세션</span>

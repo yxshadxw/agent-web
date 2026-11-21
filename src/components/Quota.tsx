@@ -1,16 +1,41 @@
-import { RefreshCw, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight, Cpu, RefreshCw, Sparkles } from 'lucide-react';
 import type { AgyQuota, AgyQuotaBucket } from '../lib/api';
+
+export type CodexQuotaSnapshot = {
+  plan?: string | null;
+  email?: string | null;
+  primary?: { usedPercent: number; windowDurationMins?: number | null; resetsAt?: number | null } | null;
+  secondary?: { usedPercent: number; windowDurationMins?: number | null; resetsAt?: number | null } | null;
+};
 
 type Props = {
   quota: AgyQuota | null;
   loading: boolean;
   onRefresh: () => void;
+  codexQuota?: CodexQuotaSnapshot | null;
+  activeEngine?: string;
+};
+
+type SubSection = {
+  title?: string;
+  buckets: AgyQuotaBucket[];
+};
+
+type UnifiedCard = {
+  id: string;
+  provider: string;
+  plan: string;
+  account?: string | null;
+  active?: boolean;
+  kind: 'agy' | 'codex';
+  sections: SubSection[];
 };
 
 function groupLabel(name: string) {
-  if (/^Gemini Models$/i.test(name)) return 'Gemini';
-  if (/^Claude and GPT models$/i.test(name)) return 'Claude · GPT';
-  return name;
+  if (/^Gemini Models$/i.test(name)) return { provider: 'Gemini', plan: 'Google' };
+  if (/^Claude and GPT models$/i.test(name)) return { provider: 'Claude · GPT', plan: 'Agy' };
+  return { provider: name, plan: '' };
 }
 
 function windowLabel(bucket: AgyQuotaBucket) {
@@ -56,15 +81,119 @@ function disabledLabel(bucket: AgyQuotaBucket) {
   return '현재 적용되지 않는 한도예요.';
 }
 
-export function QuotaSection({ quota, loading, onRefresh }: Props) {
-  if (!quota && !loading) return null;
-
-  const groups = quota?.groups ?? [];
-  const hasClaude = groups.some(
-    (group) =>
-      /claude/i.test(group.name) ||
-      group.models.some((model) => /claude/i.test(model)),
+function codexBuckets(codex: CodexQuotaSnapshot | null | undefined): AgyQuotaBucket[] {
+  if (!codex) return [];
+  const entries = [codex.primary, codex.secondary].filter(
+    (w): w is NonNullable<CodexQuotaSnapshot['primary']> => Boolean(w),
   );
+  return entries.map((win, index) => {
+    const isWeekly = (win.windowDurationMins ?? 0) >= 24 * 60;
+    return {
+      id: isWeekly ? 'codex-weekly' : `codex-5h-${index}`,
+      window: isWeekly ? 'weekly' : '5h',
+      name: isWeekly ? '주간 한도' : '5시간 한도',
+      remaining: Math.max(0, Math.min(100, Math.round(100 - win.usedPercent))),
+      resetAt: win.resetsAt ? new Date(win.resetsAt * 1000).toISOString() : null,
+      disabled: false,
+    };
+  });
+}
+
+function minRemaining(sections: SubSection[]) {
+  const vals = sections
+    .flatMap((s) => s.buckets)
+    .filter((b) => !b.disabled && typeof b.remaining === 'number')
+    .map((b) => b.remaining as number);
+  if (!vals.length) return null;
+  return Math.max(0, Math.min(100, Math.min(...vals)));
+}
+
+export function QuotaSection({
+  quota,
+  loading,
+  onRefresh,
+  codexQuota: externalCodexQuota,
+  activeEngine,
+}: Props) {
+  const [fetchedCodex, setFetchedCodex] = useState<CodexQuotaSnapshot | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (externalCodexQuota !== undefined) return;
+    let alive = true;
+    void fetch('/codex-api/quota', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data && (data.primary || data.secondary || data.plan)) {
+          setFetchedCodex(data as CodexQuotaSnapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [externalCodexQuota]);
+
+  const codex = externalCodexQuota ?? fetchedCodex;
+  const groups = quota?.groups ?? [];
+  const cards: UnifiedCard[] = [];
+  const isCodexActive = activeEngine === 'codex';
+  const isAgyActive = activeEngine === 'agy' || activeEngine === 'antigravity';
+
+  const argonGroups = groups.filter((g) => /argon/i.test(g.name));
+  const primaryGroups = groups.filter((g) => !/argon/i.test(g.name));
+
+  for (const group of primaryGroups) {
+    const { provider, plan } = groupLabel(group.name);
+    const isGemini = /^Gemini$/i.test(provider);
+    const sections: SubSection[] = [{ buckets: group.buckets }];
+    if (isGemini) {
+      for (const ag of argonGroups) {
+        sections.push({ title: ag.name, buckets: ag.buckets });
+      }
+    }
+    cards.push({
+      id: `agy:${group.name}`,
+      provider,
+      plan,
+      active: isAgyActive && isGemini,
+      kind: 'agy',
+      sections,
+    });
+  }
+
+  // If only Argon came back without a parent Gemini group, render it under Gemini.
+  if (primaryGroups.every((g) => !/gemini/i.test(g.name)) && argonGroups.length > 0) {
+    cards.unshift({
+      id: 'agy:gemini-argon',
+      provider: 'Gemini',
+      plan: 'Google',
+      active: isAgyActive,
+      kind: 'agy',
+      sections: argonGroups.map((ag) => ({ title: ag.name, buckets: ag.buckets })),
+    });
+  }
+
+  const cxBuckets = codexBuckets(codex);
+  if (cxBuckets.length > 0 || codex?.plan) {
+    const rawPlan = (codex?.plan || 'Plus').replace(/^plus$/i, 'Plus').replace(/^pro$/i, 'Pro');
+    cards.push({
+      id: 'codex:account',
+      provider: 'ChatGPT',
+      plan: rawPlan,
+      account: codex?.email || null,
+      active: isCodexActive,
+      kind: 'codex',
+      sections: [{ buckets: cxBuckets }],
+    });
+  }
+
+  const isCardOpen = (card: UnifiedCard, index: number) => {
+    if (card.id in expanded) return expanded[card.id];
+    return Boolean(card.active || (index === 0 && !cards.some((c) => c.active)));
+  };
+
+  if (cards.length === 0 && !loading && !quota?.error) return null;
 
   return (
     <section className="quota-section" aria-label="구독 한도">
@@ -73,9 +202,7 @@ export function QuotaSection({ quota, loading, onRefresh }: Props) {
           <Sparkles size={15} />
           <div>
             <div className="quota-title">구독 한도</div>
-            <div className="quota-caption">
-              Agy 계정{hasClaude ? ' · Claude 포함' : ''}
-            </div>
+            <div className="quota-caption">연결된 계정의 실제 5시간·주간 한도</div>
           </div>
         </div>
         <button
@@ -88,10 +215,10 @@ export function QuotaSection({ quota, loading, onRefresh }: Props) {
         </button>
       </div>
 
-      {loading && !quota && (
+      {loading && cards.length === 0 && (
         <div className="quota-loading" role="status">
           <RefreshCw size={14} className="spin" />
-          Agy 한도를 불러오는 중…
+          구독 한도를 불러오는 중…
         </div>
       )}
 
@@ -101,7 +228,7 @@ export function QuotaSection({ quota, loading, onRefresh }: Props) {
         </div>
       )}
 
-      {quota?.error && groups.length === 0 && (
+      {quota?.error && cards.length === 0 && (
         <div className="quota-error" role="alert">
           <span>{quota.error}</span>
           <button onClick={onRefresh} disabled={loading}>
@@ -110,70 +237,106 @@ export function QuotaSection({ quota, loading, onRefresh }: Props) {
         </div>
       )}
 
-      {groups.map((group) => (
-        <article className="quota-card" key={group.name}>
-          <div className="quota-group-head">
-            <span className="quota-group-name" title={group.name}>
-              {groupLabel(group.name)}
-            </span>
-            {group.models.length > 0 && (
-              <span className="quota-group-meta">
-                {`${group.models.slice(0, 3).join(' · ')}${
-                  group.models.length > 3 ? ` 외 ${group.models.length - 3}` : ''
-                }`}
-              </span>
-            )}
-          </div>
+      {cards.map((card, index) => {
+        const open = isCardOpen(card, index);
+        const pct = minRemaining(card.sections);
+        if (!open) {
+          return (
+            <button
+              type="button"
+              key={card.id}
+              className="sub-row"
+              onClick={() => setExpanded((prev) => ({ ...prev, [card.id]: true }))}
+              aria-expanded={false}
+            >
+              <ChevronRight size={15} className="sub-chev" />
+              {card.kind === 'codex' ? <Cpu size={15} /> : <Sparkles size={15} />}
+              <span className="sub-name">{card.provider}</span>
+              {card.plan && <span className="sub-plan">{card.plan}</span>}
+              {card.account && <span className="sub-mail">{card.account}</span>}
+              <span
+                className="sub-ring"
+                title={pct !== null ? `남은 한도 ${pct}%` : '측정 없음'}
+                style={{
+                  background:
+                    pct !== null
+                      ? `conic-gradient(${pct <= 15 ? '#ff7b6e' : '#f2763a'} 0 ${pct}%, #2b231e ${pct}% 360deg)`
+                      : '#252529',
+                }}
+              />
+            </button>
+          );
+        }
 
-          {group.buckets.map((bucket) => {
-            const critical =
-              !bucket.disabled && bucket.remaining !== null && bucket.remaining <= 10;
-            return (
+        const hasBuckets = card.sections.some((s) => s.buckets.length > 0);
+        return (
+          <article className="sub-card" key={card.id}>
+            <button
+              type="button"
+              className="sub-head sub-head-toggle"
+              onClick={() => setExpanded((prev) => ({ ...prev, [card.id]: false }))}
+              aria-expanded={true}
+            >
+              <ChevronDown size={14} className="sub-chev" />
+              {card.kind === 'codex' ? <Cpu size={15} /> : <Sparkles size={15} />}
+              <span className="sub-name">{card.provider}</span>
+              {card.plan && <span className="sub-plan">{card.plan}</span>}
+              {card.active && <span className="sub-using">사용 중</span>}
+              {card.account && <span className="sub-mail">{card.account}</span>}
+            </button>
+
+            {card.sections.map((section, sIdx) => (
               <div
-                className={`quota-window ${bucket.disabled ? 'disabled' : ''} ${
-                  critical ? 'critical' : ''
-                }`}
-                key={`${group.name}-${bucket.id}-${bucket.window}`}
+                key={`${card.id}-sec-${sIdx}`}
+                className={section.title ? 'sub-nested' : undefined}
               >
-                <div className="quota-line">
-                  <span>{windowLabel(bucket)}</span>
-                  <strong>{remainingLabel(bucket)}</strong>
-                </div>
-                {!bucket.disabled && (
-                  <div
-                    className="bar quota-bar"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={bucket.remaining ?? 0}
-                    aria-label={`${groupLabel(group.name)} ${windowLabel(bucket)} ${remainingLabel(bucket)}`}
-                  >
-                    <span
-                      className="bar-fill"
-                      style={{ width: `${bucket.remaining ?? 0}%` }}
-                    />
-                  </div>
-                )}
-                <div className="quota-reset">
-                  {bucket.disabled
-                    ? disabledLabel(bucket)
-                    : resetLabel(bucket) || '초기화 시간이 제공되지 않았어요.'}
-                </div>
+                {section.title && <div className="sub-nested-title">{section.title}</div>}
+                {section.buckets.map((bucket, bIdx) => {
+                  const critical =
+                    !bucket.disabled && bucket.remaining !== null && bucket.remaining <= 10;
+                  return (
+                    <div
+                      className={`quota-window sub-window ${bucket.disabled ? 'disabled' : ''} ${
+                        critical ? 'critical' : ''
+                      }`}
+                      key={`${card.id}-${sIdx}-${bucket.id}-${bIdx}`}
+                    >
+                      <div className="usage-row">
+                        <span>{windowLabel(bucket)}</span>
+                        <span className="usage-pct">{remainingLabel(bucket)}</span>
+                      </div>
+                      {!bucket.disabled && (
+                        <div
+                          className="bar sub-bar"
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={bucket.remaining ?? 0}
+                          aria-label={`${card.provider} ${windowLabel(bucket)} ${remainingLabel(bucket)}`}
+                        >
+                          <span
+                            className="bar-fill"
+                            style={{ width: `${bucket.remaining ?? 0}%` }}
+                          />
+                        </div>
+                      )}
+                      <div className="usage-reset">
+                        {bucket.disabled
+                          ? disabledLabel(bucket)
+                          : resetLabel(bucket) || '초기화 시간이 제공되지 않았어요.'}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            ))}
 
-          {group.buckets.length === 0 && (
-            <div className="quota-empty">이 그룹은 표시할 한도가 없어요.</div>
-          )}
-        </article>
-      ))}
-
-      {quota && groups.length === 0 && !quota.error && !loading && (
-        <div className="quota-empty">Agy가 표시할 한도를 반환하지 않았어요.</div>
-      )}
-
-      <div className="quota-foot">Agy CLI /usage의 실제 5시간·주간 한도</div>
+            {!hasBuckets && (
+              <div className="quota-empty">이 계정은 표시할 한도가 없어요.</div>
+            )}
+          </article>
+        );
+      })}
     </section>
   );
 }

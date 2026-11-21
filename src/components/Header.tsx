@@ -26,6 +26,8 @@ type PanelKind = 'context' | 'usage';
 
 type Props = {
   session: AgentSession | null;
+  titleOverride?: string;
+  canManageSession?: boolean;
   pathInfo: PathInfo | null;
   diffCount: number;
   onMenu: () => void;
@@ -43,6 +45,8 @@ type Props = {
 
 export function Header({
   session,
+  titleOverride,
+  canManageSession,
   pathInfo,
   diffCount,
   onMenu,
@@ -77,8 +81,9 @@ export function Header({
   }, [menuOpen]);
 
   const directory = session?.directory || pathInfo?.worktree || '';
-  const title = session?.title || baseName(directory) || '에이전트 스튜디오';
+  const title = titleOverride || session?.title || baseName(directory) || '에이전트 스튜디오';
   const engine = engineOverride ?? getEngine();
+  const hasSession = Boolean(canManageSession ?? session);
 
   const menuItems: {
     label: string;
@@ -112,14 +117,14 @@ export function Header({
     { label: '병렬 데스크', icon: <Boxes size={16} />, action: onOpenDesk },
     { label: '설정', icon: <Settings size={16} />, action: onSettings },
     { label: '새 세션', icon: <Plus size={16} />, action: onNewSession },
-    { label: '타이틀 변경', icon: <Type size={16} />, action: onRename, disabled: !session },
-    { label: '세션 ID 복사', icon: <Copy size={16} />, action: onCopyId, disabled: !session },
+    { label: '타이틀 변경', icon: <Type size={16} />, action: onRename, disabled: !hasSession },
+    { label: '세션 ID 복사', icon: <Copy size={16} />, action: onCopyId, disabled: !hasSession },
     {
       label: '세션 삭제',
       icon: <Trash2 size={16} />,
       action: onDelete,
       danger: true,
-      disabled: !session,
+      disabled: !hasSession,
     },
   ];
 
