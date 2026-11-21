@@ -1210,18 +1210,27 @@ function enrichAgyTools(entries) {
         if (!line.includes('tool_calls')) continue;
         try {
           const row = JSON.parse(line);
-          for (const call of row.tool_calls || []) calls.push(agyToolDetail(call));
+          const thinking = typeof row.thinking === 'string' ? row.thinking.trim() : '';
+          (row.tool_calls || []).forEach((call, n) => {
+            const d = agyToolDetail(call);
+            if (n === 0 && thinking) d.thinking = thinking;
+            calls.push(d);
+          });
         } catch { /* skip */ }
       }
       if (!calls.length) continue;
       const tail = calls.slice(-toolEntries.length);
       const offset = toolEntries.length - tail.length;
       let i = 0;
-      return entries.map((e) => {
-        if (e.kind !== 'tool') return e;
+      return entries.flatMap((e) => {
+        if (e.kind !== 'tool') return [e];
         const c = tail[i - offset >= 0 ? i - offset : 0];
         const idx = i++;
-        return idx >= offset && c ? { ...e, detail: c.detail, label: c.summary || '', tool: c.tool } : e;
+        if (idx < offset || !c) return [e];
+        const enriched = { ...e, detail: c.detail, label: c.summary || '', tool: c.tool };
+        return c.thinking
+          ? [{ kind: 'thinking', role: 'assistant', text: c.thinking.slice(0, 20000) }, enriched]
+          : [enriched];
       });
     }
   } catch { /* fall back to plain entries */ }

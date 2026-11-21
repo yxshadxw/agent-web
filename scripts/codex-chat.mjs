@@ -124,9 +124,13 @@ function run(command, args, timeout = 20_000) {
 function runCodex(prompt, threadId, root, options = {}) {
   return new Promise((resolve, reject) => {
     const modelArgs = options.model ? ['--model', options.model] : [];
-    const effortArgs = options.effort
-      ? ['-c', `model_reasoning_effort="${options.effort}"`]
-      : [];
+    // Ask Codex to emit reasoning summaries so `exec --json` produces
+    // `reasoning` items the chat can render.
+    const effortArgs = [
+      ...(options.effort ? ['-c', `model_reasoning_effort="${options.effort}"`] : []),
+      '-c',
+      'model_reasoning_summary="auto"',
+    ];
     const args = threadId
       ? [
           ...effortArgs,
