@@ -948,12 +948,36 @@ function AgentsTab({
   const [modelTarget, setModelTarget] = useState<'worker' | 'coordinator' | null>(null);
   const [launching, setLaunching] = useState(false);
   const [failures, setFailures] = useState<string[]>([]);
+  const [liveModels, setLiveModels] = useState<ModelOption[]>([]);
 
   useEffect(() => {
     setWorkerModel('');
     setCoordinatorModel('');
     setModelTarget(null);
+    let alive = true;
+    void orcaApi
+      .models(agentType)
+      .then((res) => {
+        if (alive && res.ok && Array.isArray(res.models)) {
+          setLiveModels(res.models);
+        } else if (alive) {
+          setLiveModels([]);
+        }
+      })
+      .catch(() => {
+        if (alive) setLiveModels([]);
+      });
+    return () => {
+      alive = false;
+    };
   }, [agentType]);
+
+  const launchModelOptions = useMemo(() => {
+    const base = modelOptions(agentType);
+    if (!liveModels.length) return base;
+    const seen = new Set(liveModels.map((m) => m.id));
+    return [...liveModels, ...base.filter((m) => !seen.has(m.id))];
+  }, [agentType, liveModels]);
 
   const chooseModel = (id: string) => {
     if (modelTarget === 'coordinator') setCoordinatorModel(id);
@@ -988,6 +1012,11 @@ function AgentsTab({
       ];
       const success = launched.filter((launchResult) => launchResult.ok);
       if (success.length) {
+        const nowTs = String(Date.now() - 5000);
+        for (const item of success) {
+          const key = item.handle || item.sessionId;
+          if (key) localStorage.setItem(`sessionSince:${key}`, nowTs);
+        }
         const launchedModel = isSingle ? workerModel.trim() : coordinatorModel.trim();
         if (agentType === 'antigravity' && launchedModel) {
           for (const item of success) {
@@ -1302,7 +1331,7 @@ function AgentsTab({
                 <span className="row-check"><Check size={12} /></span>
               )}
             </button>
-            {modelOptions(agentType).map((option) => {
+            {launchModelOptions.map((option) => {
               const selected = (modelTarget === 'coordinator' ? coordinatorModel : workerModel) === option.id;
               return (
                 <button
@@ -3126,6 +3155,13 @@ function LogDrawer({
   const loadInFlightRef = useRef(false);
   const loadStartedAtRef = useRef(0);
   const loadTokenRef = useRef(0);
+
+  useEffect(() => {
+    setTranscript(null);
+    setSnapshot(null);
+    setFreebuffSession(null);
+    setError(null);
+  }, [agent.id, agent.terminalHandle]);
   const [freebuffModelOverride, setFreebuffModelOverride] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -3505,8 +3541,12 @@ function LogDrawer({
           .catch(() => undefined);
       }
       if (isFreebuff) {
+        const sinceKey = agent.terminalHandle || agent.orcaSessionId;
+        const since = sinceKey
+          ? Number(localStorage.getItem(`sessionSince:${sinceKey}`) || 0) || undefined
+          : undefined;
         void orcaApi
-          .freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined)
+          .freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined, since)
           .then((next) => {
             if (token !== loadTokenRef.current) return;
             setFreebuffSession((current) =>

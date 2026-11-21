@@ -137,6 +137,45 @@ async function runCommand(bin, args, { cwd, timeout = 30_000 } = {}) {
   }
 }
 
+const modelListCache = new Map();
+
+async function listAgentModels(agentName) {
+  const cached = modelListCache.get(agentName);
+  if (cached && Date.now() - cached.at < 60_000) return cached.models;
+
+  let models = [];
+  if (agentName === 'antigravity' || agentName === 'agy') {
+    const { stdout } = await execFileAsync('agy', ['models'], { timeout: 15_000 });
+    models = String(stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.replace(/[\r\u001b\[[0-9;]*[a-zA-Z]/g, '').trim())
+      .filter((line) => /^[a-z0-9][a-z0-9._:-]+\s+.+$/i.test(line))
+      .map((line) => {
+        const m = line.match(/^(\S+)\s+(.+)$/);
+        return m ? { id: m[1].trim(), label: m[2].trim() } : null;
+      })
+      .filter(Boolean);
+  } else if (agentName === 'opencode') {
+    const { stdout } = await execFileAsync('opencode', ['models'], { timeout: 15_000 });
+    models = String(stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^[a-z0-9._-]+\/[a-z0-9._-]+$/i.test(line))
+      .map((id) => ({
+        id,
+        label: id
+          .split('/')
+          .pop()
+          .replace(/-free$/i, '')
+          .replace(/-/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase()),
+      }));
+  }
+
+  modelListCache.set(agentName, { at: Date.now(), models });
+  return models;
+}
+
 async function runOrca(args, timeout = ORCA_TIMEOUT) {
   const cleanEnv = { ...process.env };
   delete cleanEnv.ORCA_SESSION_ID;
@@ -1127,12 +1166,12 @@ function opencodeEntries(messages) {
   return entries;
 }
 
-async function readOpencodeSession(rawPath) {
+async function readOpencodeSession(rawPath, since = 0) {
   const worktree = await resolveWorktreePath(rawPath);
   const dir = encodeURIComponent(worktree.path);
   const { body: list } = await fetchJson(`${OPENCODE_URL}/session?directory=${dir}`, {});
   const sessions = (Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [])
-    .filter((x) => x.directory === worktree.path && !x.parentID)
+    .filter((x) => x.directory === worktree.path && !x.parentID && (!since || (x.time?.updated || 0) >= since))
     .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
   if (!sessions.length) return { ok: false, entries: [], error: 'OpenCode 세션을 찾지 못했습니다.', fetchedAt: new Date().toISOString() };
   const chosen = sessions[0];
@@ -1142,7 +1181,7 @@ async function readOpencodeSession(rawPath) {
   return { ok: true, entries, chatId: chosen.id, updatedAt: chosen.time?.updated || Date.now(), truncated: false, fetchedAt: new Date().toISOString() };
 }
 
-async function readFreebuffSession(rawPath, requestedChat) {
+async function readFreebuffSession(rawPath, requestedChat, since = 0) {
   const worktree = await resolveWorktreePath(rawPath);
   const projectDir = freebuffProjectDirForPath(worktree.path);
   if (!existsSync(projectDir)) {
@@ -1155,6 +1194,14 @@ async function readFreebuffSession(rawPath, requestedChat) {
   }
   const chat = findFreebuffChat(projectDir, requestedChat);
   const fileStat = statSync(chat.file);
+  if (since && !requestedChat && fileStat.mtimeMs < since) {
+    return {
+      ok: false,
+      entries: [],
+      error: '새 Freebuff 세션 대기 중입니다.',
+      fetchedAt: new Date().toISOString(),
+    };
+  }
   const cached = freebuffSessionCache.get(chat.file);
   if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
     return { ...cached.payload, fetchedAt: new Date().toISOString() };
@@ -2140,8 +2187,9 @@ async function route(req, res) {
 
   if (method === 'GET' && path === '/freebuff/session') {
     try {
+      const since = Number(url.searchParams.get('since') || 0) || 0;
       if (url.searchParams.get('kind') === 'opencode') {
-        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || ''));
+        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || '', since));
         return;
       }
       json(
@@ -2150,6 +2198,7 @@ async function route(req, res) {
         await readFreebuffSession(
           url.searchParams.get('path') || '',
           url.searchParams.get('chat') || '',
+          since,
         ),
       );
     } catch (error) {
@@ -2159,6 +2208,17 @@ async function route(req, res) {
         error: errorMessage(error),
         fetchedAt: new Date().toISOString(),
       });
+    }
+    return;
+  }
+
+  if (method === 'GET' && path === '/models') {
+    const agentName = (url.searchParams.get('agent') || '').trim().toLowerCase();
+    try {
+      const models = await listAgentModels(agentName);
+      json(res, 200, { ok: true, models });
+    } catch (error) {
+      json(res, 200, { ok: false, models: [], error: errorMessage(error) });
     }
     return;
   }
