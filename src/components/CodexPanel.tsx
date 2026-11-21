@@ -19,6 +19,7 @@ import {
   Search,
   ShieldCheck,
   ShieldQuestion,
+  Square,
   Terminal,
   Wrench,
   X,
@@ -291,6 +292,7 @@ export function CodexPanel({
   };
   const threadRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<number | undefined>(undefined);
+  const abortRef = useRef<AbortController | null>(null);
   const settingsTimerRef = useRef<number | undefined>(undefined);
   const statsTimerRef = useRef<number | undefined>(undefined);
   const permissionTimerRef = useRef<number | undefined>(undefined);
@@ -304,6 +306,7 @@ export function CodexPanel({
     : CONTEXT_WINDOW;
   const selectedModel = CODEX_MODELS.find((option) => option.value === model) || CODEX_MODELS[0];
   const selectedEffort = CODEX_EFFORTS.find((option) => option.value === effort) || CODEX_EFFORTS[1];
+  const elapsedLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
 
   const dismissSettings = () => {
     window.clearTimeout(settingsTimerRef.current);
@@ -500,6 +503,8 @@ export function CodexPanel({
     const prompt = draft.trim();
     if (!prompt || busy) return;
     const generation = generationRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setMessages((current) => [
       ...current,
@@ -520,6 +525,7 @@ export function CodexPanel({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({ prompt, threadId, model, effort, autoApprove }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -571,8 +577,17 @@ export function CodexPanel({
       }
     } finally {
       window.clearInterval(timerRef.current);
+      if (abortRef.current === controller) abortRef.current = null;
       if (generation === generationRef.current) setBusy(false);
     }
+  };
+
+  const abort = () => {
+    generationRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    window.clearInterval(timerRef.current);
+    setBusy(false);
   };
 
   const reset = () => {
@@ -730,10 +745,12 @@ export function CodexPanel({
           })}
 
           {busy && (
-            <div className="codex-thinking" role="status">
-              <Loader2 size={14} className="spin" />
-              <span>작업 중...</span>
-              <small>{elapsed}s</small>
+            <div className="bubble-row agent bubble-in codex-agy-typing" role="status">
+              <span className="agent-dot" />
+              <div className="bubble agent typing">
+                <Loader2 size={14} className="spin" />
+                <span>생각하는 중…</span>
+              </div>
             </div>
           )}
 
@@ -1024,19 +1041,23 @@ export function CodexPanel({
                 }}
                 placeholder="Codex에게 메시지를 입력하세요"
                 rows={1}
-                disabled={busy}
                 aria-label="Codex 메시지 입력"
               />
               <button
-                className={`send-btn ${draft.trim() ? 'ready' : ''}`}
-                type="submit"
-                disabled={!draft.trim() || busy}
-                aria-label="Codex에 전송"
+                className={`send-btn ${busy ? 'stopping' : draft.trim() ? 'ready' : ''}`}
+                type={busy ? 'button' : 'submit'}
+                onClick={busy ? abort : undefined}
+                disabled={!busy && !draft.trim()}
+                aria-label={busy ? 'Codex 작업 중단' : 'Codex에 전송'}
               >
-                {busy ? <Loader2 size={15} className="spin" /> : <ArrowUp size={17} />}
+                {busy ? (
+                  <Square size={13} fill="currentColor" />
+                ) : (
+                  <ArrowUp size={17} strokeWidth={2.4} />
+                )}
               </button>
           </form>
-          <div className="toolbar codex-toolbar">
+          <div className="toolbar">
             <button
               type="button"
               className={`tb-item ${autoApprove ? 'approved' : ''} ${permissionOpen ? 'is-open' : ''}`}
@@ -1047,13 +1068,14 @@ export function CodexPanel({
                 if (permissionOpen) closePermission();
                 else openPermission();
               }}
-              title={autoApprove ? '권한: 자동 승인' : '권한: 명령마다 확인'}
+              title={autoApprove ? '권한 요청을 자동으로 허용해요' : '권한 요청을 직접 확인해요'}
               aria-expanded={permissionOpen}
             >
               {autoApprove ? <ShieldCheck size={14} /> : <ShieldQuestion size={14} />}
-              <span>권한</span>
+              <span>{autoApprove ? '자동' : '확인'}</span>
+              <ChevronDown size={12} className={`tb-chev ${permissionOpen ? 'flip' : ''}`} />
             </button>
-            <div className="tb-center codex-toolbar-center">
+            <div className="tb-center">
               <button
                 type="button"
                 className={`tb-item model ${settingsPanel === 'model' ? 'is-open' : ''}`}
@@ -1080,7 +1102,7 @@ export function CodexPanel({
                 }}
                 aria-expanded={settingsPanel === 'effort'}
               >
-                <span>{selectedEffort.label}</span>
+                <span>{selectedEffort.value}</span>
                 <ChevronDown
                   size={12}
                   className={`tb-chev ${settingsPanel === 'effort' ? 'flip' : ''}`}
@@ -1089,7 +1111,7 @@ export function CodexPanel({
             </div>
             <button
               type="button"
-              className={`tb-item timer ${statsVisible ? 'is-open' : ''}`}
+              className={`tb-item timer ${busy ? 'busy' : 'idle'} ${statsVisible ? 'is-open' : ''}`}
               onClick={() => {
                 setPermissionOpen(false);
                 setPermissionClosing(false);
@@ -1097,24 +1119,17 @@ export function CodexPanel({
                 if (statsVisible) closeStats();
                 else openStats();
               }}
+              title="Codex 사용량과 컨텍스트"
               aria-label={statsVisible ? 'Codex 사용량 닫기' : 'Codex 사용량과 컨텍스트'}
             >
-              <Gauge size={14} />
-              <span>사용량</span>
-              <small className="tb-meta">
-                {usage && usage.contextWindow
-                  ? `${Math.round(Math.min(100, (usage.context / usage.contextWindow) * 100))}%`
-                  : '—'}
-              </small>
-            </button>
-            <button
-              type="button"
-              className="tb-item codex-new-chat"
-              onClick={reset}
-              title="새 Codex 대화"
-              aria-label="새 Codex 대화"
-            >
-              <Plus size={13} />
+              <span
+                className="timer-ring"
+                title={`컨텍스트 ${Math.round(contextPct)}%`}
+                style={{
+                  background: `conic-gradient(#f2763a 0 ${contextPct}%, #35251e ${contextPct}% 360deg)`,
+                }}
+              />
+              <span>{elapsedLabel}</span>
             </button>
           </div>
         </div>

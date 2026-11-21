@@ -125,20 +125,27 @@ const MODEL_OPTIONS: Record<string, ModelOption[]> = {
   ],
   antigravity: [
     { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+    { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
     { id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' },
     { id: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
-    { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
     { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+    { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
     { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
     { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
+    { id: 'gemini-4-hydrogen-xhigh', label: 'Gemini 4 Hydrogen (XHigh)' },
     { id: 'gemini-4-hydrogen-medium', label: 'Gemini 4 Hydrogen (Medium)' },
     { id: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen (Low)' },
+    { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator (Neon)' },
+    { id: 'gemini-pro-orchestrator-g1-pro', label: 'Orchestrator (Argon)' },
     { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
     { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
     { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
-    { id: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
-    { id: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
+    { id: 'claude-opus-5-5-low', label: 'Claude Opus 5.5 (Low)' },
+    { id: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5 (Medium)' },
     { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 (High)' },
+    { id: 'claude-sonnet-5-5-low', label: 'Claude Sonnet 5.5 (Low)' },
+    { id: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
+    { id: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
   ],
   gemini: [
@@ -2586,6 +2593,31 @@ function freebuffStatus(lines: string[], working: boolean) {
   };
 }
 
+// Agy's native screen ends with a footer like `Gemini 3.8 Flash · high`, and
+// its /usage screen prints weekly and five-hour remaining rows. The Orca chat
+// payload does not include either, so read them from the live screen when it
+// exists and fall back to the account quota below.
+function agyStatus(lines: string[]) {
+  const joined = lines.join('\n');
+  const footer = [...lines]
+    .reverse()
+    .find((line) => /(?:Gemini|Claude|GPT|Orchestrator)[^·\n]*·\s*(?:high|medium|low|xhigh)\b/i.test(line));
+  const model = footer?.match(/([^·]+?)\s*·\s*(high|medium|low|xhigh)\s*$/i);
+  const weekly = joined.match(
+    /Weekly Limit Remaining[\s\S]{0,180}?\[\s*[^\]]*]\s*([\d.]+)\s*%?/i,
+  );
+  const fiveHour = joined.match(
+    /Five Hour Limit Remaining[\s\S]{0,180}?\[\s*[^\]]*]\s*([\d.]+)\s*%?/i,
+  );
+  return {
+    model: model?.[1]?.trim() || null,
+    effort: model?.[2]?.toLowerCase() || null,
+    weekly: weekly?.[1] ?? null,
+    fiveHour: fiveHour?.[1] ?? null,
+    account: joined.match(/Account:\s*(\S+)/i)?.[1] ?? null,
+  };
+}
+
 
 function selectedFreebuffPickerModel(lines: string[]): string | null {
   for (const line of lines) {
@@ -3048,8 +3080,9 @@ function LogDrawer({
     !isFreebuff &&
     (agent.kind === 'chat' ||
       (!agent.terminalHandle && Boolean(agent.orcaSessionId)));
-  const isAgyChat = isChat && agent.agent === 'antigravity';
-  const { quota: agyQuota } = useAgyQuota(isAgyChat);
+  const isAgy = agent.agent === 'antigravity';
+  const isAgyChat = isChat && isAgy;
+  const { quota: agyQuota } = useAgyQuota(isAgy);
   const displayMeta = isFreebuff
     ? { id: 'freebuff', label: 'Freebuff', short: 'FB', cls: 'freebuff' }
     : agentMeta(agent.agent);
@@ -3097,6 +3130,39 @@ function LogDrawer({
     : typeof agyBucket?.remaining === 'number'
       ? `${agyBucket.remaining}%`
       : '—';
+  const agyScreen = useMemo(() => agyStatus(snapshot?.tail ?? []), [snapshot]);
+  const agyUsageGroup = useMemo(() => {
+    const groups = agyQuota?.groups || [];
+    return (
+      groups.find(
+        (group) =>
+          /gemini/i.test(group.name) || group.models.some((model) => /gemini/i.test(model)),
+      ) ||
+      groups[0] ||
+      null
+    );
+  }, [agyQuota]);
+  const agyUsageText = useMemo(() => {
+    if (!isAgy) return '';
+    const parts: string[] = [];
+    if (agyScreen.weekly) parts.push(`주간 ${agyScreen.weekly}%`);
+    if (agyScreen.fiveHour) parts.push(`5시간 ${agyScreen.fiveHour}%`);
+    if (!parts.length && agyUsageGroup) {
+      for (const bucket of agyUsageGroup.buckets.slice(0, 2)) {
+        if (typeof bucket.remaining !== 'number') continue;
+        const key = `${bucket.name} ${bucket.window}`;
+        const label = /week|주간/i.test(key)
+          ? '주간'
+          : /5|five|시간/i.test(key)
+            ? '5시간'
+            : bucket.name;
+        parts.push(`${label} ${bucket.remaining}%`);
+      }
+    }
+    return parts.join(' · ') || '사용량 —';
+  }, [agyScreen, agyUsageGroup, isAgy]);
+  const agyModelLabel = agyScreen.model || (isAgy ? 'Agy' : '');
+  const agyEffortLabel = agyScreen.effort || 'effort';
   // A chat stays a chat even if Orca also exposes a terminal handle for it.
   const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking = transcript ? transcript.state === 'working' : agent.state === 'working';
@@ -3786,6 +3852,13 @@ function LogDrawer({
         {!isChat && (
         <div className="desk-log-meta">
           <span className={`desk-state ${agent.state}`}>{stateLabel(agent.state)}</span>
+          {isAgy && (
+            <span className="desk-agy-info" title={`${agyModelLabel} · ${agyUsageText}`}>
+              <b>{agyModelLabel}</b>
+              {agyScreen.effort ? ` · ${agyScreen.effort}` : ''}
+              {` · ${agyUsageText}`}
+            </span>
+          )}
           <span className={snapshot?.status === 'running' ? 'live' : ''}>
             <span className={`desk-status-dot ${isThinking ? 'working' : agent.state}`} />
             {isChat
@@ -4375,19 +4448,17 @@ function LogDrawer({
               </span>
               <div className="tb-center desk-agy-center">
                 <span className="tb-item model">
-                  <span>{isAgyChat ? 'Agy' : displayMeta.label}</span>
+                  <span>{isAgyChat ? agyModelLabel : displayMeta.label}</span>
                 </span>
                 <span className="tb-item">
-                  <span>Orca</span>
+                  <span>{isAgyChat ? agyEffortLabel : 'Orca'}</span>
                 </span>
               </div>
               <span
                 className="tb-item timer"
                 title={
                   isAgyChat
-                    ? agyTimeLabel
-                      ? `${agyTimeLabel} 후 리셋 · ${agyRemainingLabel}`
-                      : `남은 한도 ${agyRemainingLabel}`
+                    ? `${agyModelLabel} · ${agyUsageText}${agyTimeLabel ? ` · ${agyTimeLabel} 후 리셋` : ''}`
                     : 'Orca 채팅'
                 }
               >

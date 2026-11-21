@@ -7346,3 +7346,38 @@
 .sheet-layer.desk-handoff-sheet {
   z-index: 200;
 }
+
+/* Codex uses the exact Agy dock: same gradient, padding, composer shell, and
+   bottom-of-phone safe area. Its old green/violet dock is intentionally gone. */
+.codex-compose,
+.codex-embedded .codex-compose {
+  padding: 4px 12px calc(9px + env(safe-area-inset-bottom));
+  border-top: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(11, 11, 12, 0) 0%,
+    rgba(11, 11, 12, 0.94) 16%,
+    #0b0b0c 42%
+  );
+}
+
+.codex-compose .composer,
+.codex-embedded .codex-compose .composer {
+  border-color: #2e2e32;
+  background: #1a1a1c;
+}
+
+/* Agy worker info: model, effort, and live quota in the log meta row. */
+.desk-log-meta .desk-agy-info {
+  color: #a99a8b;
+  gap: 0;
+}
+
+.desk-log-meta .desk-agy-info b {
+  color: #e0c7ad;
+  font-weight: 600;
+}
+
+.codex-agy-typing {
+  margin: 4px 0 16px;
+}
