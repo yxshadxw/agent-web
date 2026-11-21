@@ -75,6 +75,28 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const lastPanelRef = useRef<{ panel: ComposerPanel; content: ReactNode } | null>(null);
+  const panelCloseTimer = useRef<number | undefined>(undefined);
+  const [, forcePanelCleanup] = useState(0);
+
+  if (panel) {
+    lastPanelRef.current = { panel, content: panelContent };
+  }
+  const visiblePanel = panel ?? lastPanelRef.current?.panel ?? null;
+  const visiblePanelContent = panel ? panelContent : lastPanelRef.current?.content ?? null;
+
+  useEffect(() => {
+    if (panel) {
+      window.clearTimeout(panelCloseTimer.current);
+      return;
+    }
+    if (!lastPanelRef.current) return;
+    panelCloseTimer.current = window.setTimeout(() => {
+      lastPanelRef.current = null;
+      forcePanelCleanup((value) => value + 1);
+    }, 240);
+    return () => window.clearTimeout(panelCloseTimer.current);
+  }, [panel]);
 
   useEffect(() => {
     const el = textarea.current;
@@ -139,15 +161,15 @@ export function Composer({
   };
 
   const panelLabel =
-    panel === 'auto'
+    visiblePanel === 'auto'
       ? '권한 설정'
-      : panel === 'model'
+      : visiblePanel === 'model'
       ? '모델 변경'
-      : panel === 'reason'
+      : visiblePanel === 'reason'
         ? '추론 강도'
-        : panel === 'context'
+        : visiblePanel === 'context'
           ? '컨텍스트'
-          : panel === 'usage'
+          : visiblePanel === 'usage'
             ? '사용량 한도'
             : '패널';
 
@@ -257,9 +279,15 @@ export function Composer({
         </div>
       )}
 
-      {panel ? (
-        <div className="inline-panel" ref={panelRef} role="region" aria-label={panelLabel}>
-          <div className="inline-panel-scroll">{panelContent}</div>
+      {visiblePanel ? (
+        <div
+          className={`inline-panel ${!panel ? 'is-collapsing' : ''}`}
+          ref={panelRef}
+          role="region"
+          aria-label={panelLabel}
+          aria-hidden={!panel || undefined}
+        >
+          <div className="inline-panel-scroll">{visiblePanelContent}</div>
         </div>
       ) : (
         <form

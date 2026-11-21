@@ -1035,8 +1035,8 @@
 }
 
 .desk-agent-tab.active.agy {
-  color: #e1b5fc;
-  background: #241a2c;
+  color: #ffc09b;
+  background: #2a1b14;
 }
 
 .desk-agent-tab.active.gemini {
@@ -1299,6 +1299,18 @@
   gap: 7px;
 }
 
+.gemini-logo {
+  display: block;
+  width: 12px;
+  height: 12px;
+  object-fit: contain;
+}
+
+.desk-agent-tab .gemini-logo {
+  width: 13px;
+  height: 13px;
+}
+
 .desk-agent-badge {
   width: 25px;
   height: 25px;
@@ -1327,9 +1339,9 @@
 }
 
 .desk-agent-badge.agy {
-  border-color: #43304d;
-  color: #d7a5f5;
-  background: #201627;
+  border-color: #5a3a27;
+  color: #f0b183;
+  background: #2a1b12;
 }
 
 .desk-agent-card-title {
@@ -2360,9 +2372,9 @@
 }
 
 .desk-credit-icon.agy {
-  border-color: #42334b;
-  color: #d8a7f3;
-  background: #1d1622;
+  border-color: #493126;
+  color: #ffad7e;
+  background: #211711;
 }
 
 .desk-credit-icon.orca {
@@ -3890,6 +3902,163 @@
   }
 }
 
+/* Agy chat in the desk mirrors the main Agy conversation view. */
+.desk-log-body.desk-agy-log-body {
+  padding: 24px 30px 8px;
+  background: #0c0c0d;
+}
+
+.desk-agy-thread {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.desk-agy-user {
+  align-self: flex-end;
+  max-width: 82%;
+  margin: 4px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid rgba(224, 138, 76, 0.28);
+  border-radius: 16px 16px 5px 16px;
+  color: #f3e7dc;
+  background: linear-gradient(180deg, #2a1c14, #241811);
+  font-size: 13.5px;
+  line-height: 1.58;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desk-agy-thread .thinking {
+  padding: 10px 0 2px;
+}
+
+.desk-agy-thread .thinking-body {
+  margin: 8px 0 2px;
+  padding: 12px 14px;
+}
+
+.desk-agy-tools {
+  margin-top: 2px;
+}
+
+.desk-agy-tool .tool-main {
+  gap: 9px;
+}
+
+.desk-agy-answer {
+  margin: 12px 0 0;
+}
+
+.desk-agy-md {
+  font-size: 13.5px;
+}
+
+.desk-agy-meta {
+  padding: 4px 0 18px;
+}
+
+.desk-agy-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 0 2px;
+  color: #8b8781;
+  font-size: 12px;
+}
+
+.desk-agy-compose {
+  padding: 10px 30px 12px;
+  border-top: 1px solid #201e20;
+  background: #101011;
+}
+
+.desk-agy-compose .composer {
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.desk-agy-toolbar {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 8px 2px 0;
+}
+
+.desk-agy-auto {
+  color: #8e8982;
+}
+
+.desk-agy-center .tb-item {
+  color: #a5a09a;
+}
+
+.desk-agy-toolbar .timer {
+  color: #c6a07b;
+}
+
+.desk-agy-compose .desk-log-compose-error {
+  width: min(760px, 100%);
+  margin: 4px auto 0;
+}
+
+/* Codex conversation uses the same reading rhythm as Agy. */
+.codex-thread.codex-agy-thread {
+  gap: 0;
+  padding: 22px 24px 8px;
+}
+
+.codex-agy-user {
+  margin: 4px 0 16px;
+}
+
+.codex-agy-turn {
+  display: flex;
+  flex-direction: column;
+}
+
+.codex-agy-turn .thinking {
+  padding-top: 0;
+}
+
+.codex-agy-turn .thinking-body {
+  margin-top: 8px;
+}
+
+.codex-agy-tools {
+  margin-top: 4px;
+}
+
+.codex-agy-turn .assistant-text {
+  margin: 12px 0 0;
+}
+
+.codex-agy-turn .msg-meta {
+  padding: 4px 0 16px;
+}
+
+.codex-agy-tool .tool-main {
+  gap: 9px;
+}
+
+@media (max-width: 720px) {
+  .desk-log-body.desk-agy-log-body {
+    padding: 18px 16px 6px;
+  }
+
+  .desk-agy-compose {
+    padding: 8px 14px 10px;
+  }
+
+  .codex-thread.codex-agy-thread {
+    padding: 16px 14px 6px;
+  }
+
+  .desk-agy-user {
+    max-width: 90%;
+  }
+}
+
 /* Live Freebuff terminal, with thinking and commands separated. */
 .desk-terminal-lines {
   padding: 14px 18px;
@@ -4383,13 +4552,144 @@
   min-width: 0;
 }
 
-/* Freebuff usage: context, session time and native model command */
-.desk-freebuff-usage {
+/* Freebuff usage: Agy's shared usage-sheet language. */
+.desk-freebuff-usage.usage-sheet {
   margin: 8px 12px 0;
-  padding: 9px 10px 8px;
-  border: 1px solid #2b272f;
-  border-radius: 9px;
-  background: linear-gradient(180deg, #17141a, #121014);
+  padding: 0 0 10px;
+  border: 1px solid #2b2b30;
+  border-radius: 16px;
+  background: #131315;
+}
+
+.desk-freebuff-usage .sheet-head {
+  padding: 12px 13px 6px;
+}
+
+.desk-freebuff-usage .usage-grid {
+  padding: 0 10px;
+}
+
+.desk-freebuff-usage .usage-list {
+  margin: 8px 10px 0;
+}
+
+.desk-freebuff-usage-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 10px 0;
+}
+
+.desk-native-model,
+.desk-native-key {
+  height: 25px;
+  padding: 0 8px;
+  border: 1px solid #332e36;
+  border-radius: 7px;
+  color: #c8c2cc;
+  background: #1b191e;
+  font-family: var(--mono);
+  font-size: 9px;
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+.desk-native-model {
+  color: #e2c8a8;
+  border-color: #44352a;
+  background: #231a16;
+}
+
+.desk-native-model:hover:not(:disabled),
+.desk-native-key:hover:not(:disabled) {
+  color: #fff2e7;
+  border-color: #7a5036;
+  background: #2e2119;
+}
+
+.desk-native-key.confirm {
+  color: #1a0d06;
+  border-color: transparent;
+  background: linear-gradient(180deg, #ff9650, #ef6f35);
+}
+
+.desk-key-label {
+  margin-left: auto;
+  color: #747077;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.desk-freebuff-usage-note {
+  margin: 8px 12px 0;
+  color: #716d75;
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+/* Tables rendered from Freebuff's raw pipe / box output. */
+.desk-term-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.desk-term-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.desk-term-table th,
+.desk-term-table td {
+  padding: 7px 9px;
+  border-bottom: 1px solid #2c2731;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.desk-term-table th {
+  color: #e2d9e8;
+  font-size: 9.5px;
+  font-weight: 650;
+  background: #1b171e;
+}
+
+.desk-term-table td {
+  color: #b8b0bd;
+}
+
+.desk-term-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.codex-md table,
+.desk-transcript-md table,
+.md table {
+  width: 100%;
+  margin: 9px 0;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.codex-md th,
+.codex-md td,
+.desk-transcript-md th,
+.desk-transcript-md td,
+.md th,
+.md td {
+  padding: 6px 8px;
+  border: 1px solid #2e2a32;
+  text-align: left;
+  vertical-align: top;
+}
+
+.codex-md th,
+.desk-transcript-md th,
+.md th {
+  color: #e9e4ec;
+  background: #1b181e;
 }
 
 .desk-freebuff-usage-head,
@@ -4971,7 +5271,2072 @@
   margin: 0 12px 8px;
 }
 
+.codex-settings-panel {
+  margin-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  border-bottom-color: transparent;
+  box-shadow: none;
+  animation: codexSettingsGrow 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The sheet is not a floating popup: it is the upper half of the composer
+   shell, so opening it grows the input vertically. */
+.codex-compose .composer {
+  transition: border-color 0.26s, border-radius 0.26s;
+}
+
+.codex-compose.settings-open .composer {
+  border-top-color: transparent;
+  border-radius: 0 0 20px 20px;
+}
+
+.codex-settings-panel.is-closing {
+  pointer-events: none;
+  animation: codexSettingsCollapse 0.26s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes codexSettingsGrow {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    max-height: 280px;
+    transform: translateY(0);
+  }
+}
+
+@keyframes codexSettingsCollapse {
+  from {
+    opacity: 1;
+    max-height: 280px;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(10px);
+  }
+}
+
+.codex-settings-panel .sheet-content {
+  padding-top: 0;
+}
+
+.codex-settings-panel .sheet-head {
+  padding-top: 10px;
+}
+
+.codex-settings-panel .model-row .row-provider,
+.codex-settings-panel .reason-row .row-provider {
+  max-width: 48%;
+  font-size: 9.5px;
+}
+
+.codex-account-quota .quota-card {
+  margin-top: 0;
+}
+
 .codex-permission-panel {
   flex: none;
   margin: 0 12px 8px;
+}
+
+
+/* Freebuff follows Agy's thread + composer + bottom toolbar layout. */
+.desk-freebuff-inline-panel {
+  flex: none;
+  max-height: min(52dvh, 430px);
+  margin-bottom: 8px;
+}
+
+.desk-freebuff-inline-panel.is-closing {
+  pointer-events: none;
+  animation: deskFreebuffPanelOut 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes deskFreebuffPanelOut {
+  from {
+    opacity: 1;
+    max-height: min(52dvh, 430px);
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(12px) scale(0.992);
+  }
+}
+
+.desk-freebuff-inline-panel .sheet-content {
+  padding-top: 0;
+}
+
+.desk-freebuff-inline-panel .desk-freebuff-usage.usage-sheet {
+  margin: 0;
+  padding: 0 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.desk-freebuff-inline-panel .desk-freebuff-usage .sheet-head {
+  padding: 10px 12px 6px;
+}
+
+.desk-freebuff-inline-panel .desk-freebuff-usage .usage-grid {
+  padding: 0 12px;
+}
+
+.desk-freebuff-inline-panel .desk-freebuff-usage .usage-list {
+  margin: 8px 12px 0;
+}
+
+.desk-freebuff-model-sheet .sheet-head {
+  padding: 10px 12px 6px;
+}
+
+.desk-freebuff-model-sheet .sheet-row {
+  cursor: pointer;
+}
+
+.desk-freebuff-model-sheet .sheet-row:hover {
+  background: #1d1a20;
+}
+
+.desk-freebuff-model-sheet .sheet-row:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.desk-freebuff-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 8px 12px 0;
+  border-top: 1px solid #28242c;
+}
+
+.desk-freebuff-picker .desk-key-label {
+  margin-left: 2px;
+}
+
+.desk-freebuff-panel-note {
+  margin: 8px 12px 10px;
+  color: #716d75;
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+.desk-freebuff-toolbar {
+  padding: 9px 2px 0;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-center {
+  gap: 6px;
+}
+
+.desk-freebuff-live {
+  cursor: default;
+  color: #8e8790;
+  font-size: 10px;
+}
+
+.desk-freebuff-live:hover {
+  background: transparent;
+  color: #8e8790;
+}
+
+.desk-freebuff-live.active {
+  color: #ffb07b;
+}
+
+.desk-freebuff-live .status-dot {
+  width: 5px;
+  height: 5px;
+}
+
+.desk-freebuff-toolbar .tb-item.model span:first-child {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desk-freebuff-toolbar .tb-item.timer {
+  gap: 6px;
+}
+
+.desk-freebuff-url {
+  color: #77717a;
+}
+
+.desk-freebuff-url:disabled {
+  opacity: 0.4;
+}
+
+.desk-freebuff-empty {
+  padding-top: 11vh;
+}
+
+.desk-freebuff-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #4a3023;
+  border-radius: 14px;
+  color: #ffb184;
+  background: #211711;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.desk-log-panel.is-freebuff .desk-log-foot {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .desk-freebuff-toolbar .tb-item.model span:first-child {
+    max-width: 130px;
+  }
+}
+
+
+.desk-freebuff-switching {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 12px 4px;
+  color: #c4a77e;
+  font-size: 9.5px;
+}
+
+.desk-freebuff-panel-note.error {
+  color: #d18d81;
+}
+
+.desk-credit-icon.codex {
+  border-color: #2f4436;
+  color: #9fd9b6;
+  background: #142019;
+}
+
+/* Agent logos: official marks instead of letter badges. */
+.agent-logo {
+  display: block;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  object-fit: contain;
+}
+
+.desk-agent-tab .agent-logo {
+  width: 13px;
+  height: 13px;
+}
+
+.desk-credit-icon .agent-logo {
+  width: 15px;
+  height: 15px;
+}
+
+.desk-btn.continue {
+  border-color: #5a3b27;
+  color: #ffc19a;
+  background: #241811;
+}
+
+.desk-btn.continue:hover {
+  border-color: #8b5937;
+  color: #fff0e4;
+}
+
+.desk-freebuff-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid #2a252d;
+}
+
+.desk-freebuff-sent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #897b83;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.desk-freebuff-sent-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #ffb184;
+}
+
+.desk-freebuff-sent-head small {
+  color: #6f646d;
+  font-size: 8px;
+}
+
+.desk-freebuff-sent-item {
+  padding: 8px 10px;
+  border: 1px solid #443128;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #1d1410, #17110f);
+}
+
+.desk-freebuff-sent-item > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #c99d80;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.desk-freebuff-sent-item time {
+  color: #776961;
+  font-size: 7.5px;
+}
+
+.desk-freebuff-sent-item p {
+  margin: 5px 0 0;
+  color: #ead9cd;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* Visible upload target in the Freebuff composer. */
+.desk-freebuff-upload {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px dashed #4b3a2e;
+  border-radius: 12px;
+  color: #b9a396;
+  background: linear-gradient(180deg, #181312, #121011);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.desk-freebuff-upload:hover,
+.desk-freebuff-upload:focus-visible,
+.desk-freebuff-upload.is-dragging {
+  border-color: #b86c40;
+  background: linear-gradient(180deg, #231711, #171110);
+}
+
+.desk-freebuff-upload.is-dragging {
+  transform: translateY(-1px);
+}
+
+.desk-freebuff-upload-icon {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid #4d3627;
+  border-radius: 8px;
+  color: #ffae7e;
+  background: #24170f;
+}
+
+.desk-freebuff-upload-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.desk-freebuff-upload-copy strong,
+.desk-freebuff-upload-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desk-freebuff-upload-copy strong {
+  color: #dfcabb;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.desk-freebuff-upload-copy small {
+  color: #7e6f67;
+  font-size: 8.5px;
+}
+
+.desk-freebuff-upload-action {
+  flex: none;
+  padding: 4px 7px;
+  border: 1px solid #523a2b;
+  border-radius: 6px;
+  color: #d6a17f;
+  font-family: var(--mono);
+  font-size: 8px;
+  background: #20150f;
+}
+
+/* The panel grows above a composer that never unmounts. */
+.desk-freebuff-panel-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-bottom: 8px;
+  opacity: 1;
+  transform-origin: bottom center;
+  animation: deskFreebuffSlotIn 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    grid-template-rows 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease,
+    margin-bottom 0.24s ease;
+}
+
+.desk-freebuff-panel-slot.is-closing {
+  grid-template-rows: 0fr;
+  margin-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.desk-freebuff-panel-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.desk-freebuff-inline-panel {
+  margin-bottom: 0;
+  animation: none;
+}
+
+.desk-freebuff-inline-panel.is-closing {
+  animation: none;
+}
+
+@keyframes deskFreebuffSlotIn {
+  from {
+    grid-template-rows: 0fr;
+    margin-bottom: 0;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    margin-bottom: 8px;
+    opacity: 1;
+  }
+}
+
+.row-provider .model-multiplier {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #ffb184;
+  background: #291a12;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.tb-model-multiplier {
+  flex: none;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #c59d80;
+  background: #291a12;
+  font-family: var(--mono);
+  font-size: 7.5px;
+}
+
+@media (max-width: 720px) {
+  .desk-freebuff-upload {
+    align-items: flex-start;
+  }
+
+  .desk-freebuff-upload-action {
+    display: none;
+  }
+}
+
+/* Codex follows Agy's neutral violet thread and message rhythm. No green. */
+.codex-panel {
+  border-color: #2d2931;
+  background:
+    radial-gradient(80% 45% at 50% 0%, rgba(159, 121, 255, 0.055), transparent 65%),
+    #0c0b0e;
+}
+.codex-head {
+  border-bottom-color: #2a262d;
+  background: rgba(12, 11, 14, 0.94);
+}
+.codex-mark {
+  border-color: #44384d;
+  color: #d0a7e8;
+  background: #1c1521;
+}
+.codex-title strong { color: #e9e2ec; }
+.codex-title span { color: #827987; }
+.codex-thread { scrollbar-color: #39323d transparent; }
+.codex-msg-label { color: #79717f; font-family: var(--mono); }
+.codex-msg-text {
+  border-color: #2d2831;
+  color: #dcd6df;
+  background: #141216;
+}
+.codex-msg.user .codex-msg-text {
+  border-color: rgba(242, 118, 58, 0.28);
+  border-bottom-right-radius: 5px;
+  color: #f6e9e0;
+  background: linear-gradient(180deg, #2a1c14, #241811);
+}
+.codex-msg.assistant .codex-msg-text {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #dcd9d5;
+  background: transparent;
+  line-height: 1.72;
+}
+.codex-compose {
+  border-top-color: #2a262d;
+  background: #100f12;
+}
+.codex-embedded .codex-compose {
+  background: #100f12;
+}
+.codex-embedded .codex-compose .composer {
+  border-color: #302c34;
+  background: #1a181d;
+}
+.codex-thinking {
+  border-color: #3a3142;
+  color: #cbb7dd;
+  background: #17131b;
+}
+.codex-reasoning {
+  border-left-color: #4a3b55;
+  color: #9b8fa4;
+}
+.codex-reasoning summary { color: #bba5cb; }
+.codex-md a { color: #c9a4ff; }
+.codex-md pre {
+  border-color: #302b32;
+  background: #0e0d10;
+}
+.codex-md code {
+  background: #211d25;
+  color: #ddcbea;
+}
+.codex-empty-agy .codex-empty-mark {
+  border-color: #44384d;
+  color: #d0a7e8;
+  background: #1c1521;
+}
+.codex-empty-agy strong { color: #e9e2ec; }
+.codex-empty-agy p { color: #877e8d; }
+.codex-empty-suggestions button {
+  border-color: #312b36;
+  color: #cfc5d5;
+  background: #161318;
+}
+.codex-empty-suggestions button:hover {
+  border-color: #5c476d;
+  color: #f0e4f7;
+  background: #1d1722;
+}
+.codex-empty-suggestions button svg { color: #a98bc0; }
+.codex-empty-hint { color: #7b7182; }
+.codex-toolbar .tb-meta {
+  color: #7d7584;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+/* Match Codex's well-behaved max-height panel animation. The composer is
+   outside the conditional panel and therefore never disconnects/reappears. */
+.desk-freebuff-panel-slot,
+.desk-freebuff-panel-slot.is-closing {
+  display: block;
+  grid-template-rows: none;
+  margin: 0;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  animation: none;
+  transition: none;
+}
+.desk-freebuff-panel-clip {
+  min-height: 0;
+  overflow: visible;
+}
+.desk-freebuff-inline-panel {
+  margin-bottom: 8px;
+  animation: deskFreebuffPanelIn 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.desk-freebuff-inline-panel.is-closing {
+  pointer-events: none;
+  animation: deskFreebuffPanelOut 0.26s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes deskFreebuffPanelIn {
+  from {
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    max-height: min(52dvh, 430px);
+    margin-bottom: 0;
+    transform: translateY(0);
+  }
+}
+@keyframes deskFreebuffPanelOut {
+  from {
+    opacity: 1;
+    max-height: min(52dvh, 430px);
+    margin-bottom: 0;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* Freebuff's composer is one Agy-style shell. Opening a panel grows this
+   same rounded surface upward instead of adding a separate window. */
+.desk-freebuff-compose {
+  padding-bottom: 8px;
+}
+
+.desk-freebuff-compose-shell {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #373139;
+  border-radius: 20px;
+  background: #1a181c;
+  transition: border-color 0.26s ease, box-shadow 0.26s ease;
+}
+
+.desk-freebuff-compose-shell:focus-within {
+  border-color: #5a476d;
+  box-shadow: 0 0 0 3px rgba(159, 121, 255, 0.06);
+}
+
+.desk-freebuff-compose-shell.is-dragging {
+  border-color: #b86c40;
+  box-shadow: 0 0 0 3px rgba(242, 118, 58, 0.09);
+}
+
+.desk-freebuff-compose-shell .composer {
+  width: 100%;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.desk-freebuff-compose-shell .composer textarea {
+  padding: 8px 0;
+}
+
+.desk-freebuff-compose-shell .composer:focus-within {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.desk-freebuff-compose-shell .desk-freebuff-panel-slot {
+  margin: 0;
+}
+
+.desk-freebuff-compose-shell .desk-freebuff-panel-clip {
+  overflow: hidden;
+}
+
+.desk-freebuff-compose-shell .desk-freebuff-inline-panel {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #2a252e;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.desk-freebuff-compose-shell.is-expanded .desk-freebuff-inline-panel {
+  margin-bottom: 0;
+}
+
+.desk-freebuff-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #ffc19a;
+  background: rgba(20, 14, 12, 0.92);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.desk-freebuff-compose-shell .desk-freebuff-inline-panel.is-closing {
+  border-bottom-color: transparent;
+}
+
+/* Codex usage/permission sheets are the upper half of the same composer
+   surface. They connect to the input with no gap or floating-card corners,
+   matching Agy's growing composer. */
+.codex-usage-panel,
+.codex-permission-panel {
+  margin: 0 14px;
+  border-radius: 20px 20px 0 0;
+  border-color: #373139;
+  border-bottom-color: transparent;
+  background: #1a181c;
+  box-shadow: none;
+}
+
+.codex-usage-panel + .codex-compose,
+.codex-permission-panel + .codex-compose {
+  padding-top: 0;
+}
+
+.codex-usage-panel + .codex-compose .composer,
+.codex-permission-panel + .codex-compose .composer {
+  border-top-color: transparent;
+  border-radius: 0 0 20px 20px;
+  background: #1a181c;
+}
+
+.codex-usage-panel .sheet-content,
+.codex-permission-panel .inline-panel-scroll {
+  border-radius: inherit;
+}
+
+.codex-usage-panel.is-collapsing,
+.codex-permission-panel.is-collapsing {
+  border-bottom-color: transparent;
+}
+
+/* Freebuff follows Agy's conversation surface: plain assistant prose, real
+   tool rows, and user turns in the same scrolling flow. */
+.desk-log-title > div {
+  min-width: 0;
+}
+
+.desk-log-title strong {
+  display: block;
+  max-width: min(56vw, 680px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.desk-terminal-lines {
+  gap: 7px;
+  padding: 14px 16px 18px;
+  font-family: var(--sans);
+}
+
+.desk-term-block.text {
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  color: #ddd6df;
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.desk-term-block.text .desk-term-line {
+  min-height: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.desk-term-block.thinking {
+  border-radius: 12px;
+  background: #151318;
+}
+
+.desk-tool-card {
+  margin: 3px 0;
+  border: 1px solid #2d2930;
+  border-radius: 10px;
+  background: #17151a;
+  color: #cfc65a;
+  overflow: hidden;
+}
+
+.desk-tool-card > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 39px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.desk-tool-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.desk-tool-check {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 6px;
+  color: #7fd39b;
+  background: #17261c;
+}
+
+.desk-tool-check.running {
+  color: #e8b175;
+  background: #281d14;
+}
+
+.desk-tool-terminal {
+  display: inline-flex;
+  align-items: center;
+  color: #9c94a3;
+}
+
+.desk-tool-card strong {
+  flex: none;
+  color: #e8e0ea;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.desk-tool-card code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #cabfc8;
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.desk-tool-card summary small {
+  flex: none;
+  color: #746d79;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.desk-tool-chev {
+  flex: none;
+  color: #716977;
+  transition: transform 0.2s ease;
+}
+
+.desk-tool-card[open] .desk-tool-chev {
+  transform: rotate(180deg);
+}
+
+.desk-tool-card pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 8px 11px;
+  border-top: 1px solid #29252e;
+  color: #bdb4c3;
+  background: #0f0e11;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+.desk-freebuff-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: flex-end;
+  gap: 4px;
+  max-width: min(86%, 560px);
+  margin: 5px 0 7px;
+}
+
+.desk-freebuff-msg-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 2px;
+  color: #8c7d75;
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.desk-freebuff-msg-meta span {
+  color: #cba48d;
+  letter-spacing: 0.08em;
+}
+
+.desk-freebuff-msg .desk-freebuff-msg-meta time {
+  color: #6f626b;
+}
+
+.desk-freebuff-msg p {
+  margin: 0;
+  padding: 10px 13px;
+  border: 1px solid rgba(242, 118, 58, 0.36);
+  border-radius: 16px 16px 5px 16px;
+  color: #f1e2d8;
+  background: linear-gradient(180deg, #241a15, #201611);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-auto {
+  gap: 5px;
+  color: #6fca87;
+  cursor: default;
+  font-size: 10px;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-auto:hover {
+  background: transparent;
+  color: #6fca87;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-auto.working {
+  color: #d7b071;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-auto svg {
+  flex: none;
+}
+
+/* The whole input surface grows and shrinks, not just the content inside it. */
+.codex-usage-panel,
+.codex-permission-panel {
+  animation: codexFlowIn 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.codex-usage-panel.is-collapsing,
+.codex-permission-panel.is-collapsing {
+  animation: codexFlowOut 0.26s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes codexFlowIn {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    max-height: min(62dvh, 560px);
+    transform: translateY(0);
+  }
+}
+
+@keyframes codexFlowOut {
+  from {
+    opacity: 1;
+    max-height: min(62dvh, 560px);
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Terminal timestamps are metadata, not full-width cards. */
+.desk-term-block.stamp {
+  align-self: flex-end;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  color: #6f6873;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+/* Freebuff session flow, read from Freebuff's own chat store. Reasoning,
+   the complete multiline command and its output are all preserved instead
+   of being cut to the TUI viewport. */
+.desk-freebuff-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 3px 1px 5px;
+  animation: deskFreebuffFlowIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.desk-freebuff-agent-label {
+  color: #a98bc0;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+
+.desk-freebuff-agent .desk-transcript-md {
+  color: #e3e0da;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.desk-freebuff-think {
+  overflow: visible;
+  padding: 4px 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  animation: deskFreebuffFlowIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.desk-freebuff-think > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 0;
+  color: #b6a79d;
+  font-family: var(--sans);
+  font-size: 13px;
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.desk-freebuff-think > summary::-webkit-details-marker {
+  display: none;
+}
+
+.desk-freebuff-think > summary small {
+  color: #7a7675;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0;
+}
+
+.desk-freebuff-think .desk-tool-chev {
+  margin-left: auto;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.desk-freebuff-think[open] .desk-tool-chev {
+  transform: rotate(180deg);
+}
+
+.desk-freebuff-think[open] > summary {
+  border-bottom: 0;
+}
+
+.desk-freebuff-think > pre {
+  max-height: min(42dvh, 420px);
+  margin: 9px 0 2px;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid #222226;
+  border-radius: 11px;
+  color: #a3a1a4;
+  background: #111113;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.75;
+  letter-spacing: -0.05px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desk-freebuff-tool {
+  animation: deskFreebuffFlowIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.desk-tool-lines {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: #8f8399;
+  background: #221d27;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.desk-freebuff-tool-detail {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #29252e;
+  background: #0f0e11;
+  animation: deskFreebuffToolDetail 0.22s ease both;
+}
+
+.desk-freebuff-tool-label {
+  padding: 8px 11px 0;
+  color: #6fca87;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+
+.desk-freebuff-tool-label:not(:first-child) {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px dashed #29252e;
+}
+
+.desk-freebuff-tool-detail pre {
+  max-height: min(38dvh, 360px);
+  margin: 0;
+  padding: 6px 11px 10px;
+  overflow: auto;
+  color: #c7becd;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desk-freebuff-msg {
+  animation: deskFreebuffFlowIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Softer, spring-like grow/shrink for the composer sheet. */
+.desk-freebuff-inline-panel {
+  transform-origin: bottom center;
+  animation: deskFreebuffPanelIn 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: max-height, opacity, transform;
+}
+
+.desk-freebuff-inline-panel.is-closing {
+  pointer-events: none;
+  animation: deskFreebuffPanelOut 0.26s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.desk-freebuff-compose-shell {
+  transition:
+    border-color 0.26s ease,
+    box-shadow 0.26s ease,
+    border-radius 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes deskFreebuffFlowIn {
+  from {
+    opacity: 0;
+    transform: translateY(9px) scale(0.996);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes deskFreebuffToolDetail {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes deskFreebuffPanelIn {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  55% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    max-height: min(52dvh, 430px);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes deskFreebuffPanelOut {
+  from {
+    opacity: 1;
+    max-height: min(52dvh, 430px);
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desk-freebuff-inline-panel,
+  .desk-freebuff-agent,
+  .desk-freebuff-think,
+  .desk-freebuff-tool,
+  .desk-freebuff-msg,
+  .desk-freebuff-tool-detail {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Header metadata stays on one line and truncates instead of wrapping one
+   character at a time when the action row is wide. */
+.desk-log-title > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.desk-log-title span:not(.desk-agent-badge) {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
+
+/* Match Agy: the top bar is a title plus icon actions, never a row of
+   labeled buttons. Tool calls and thinking follow the same flat page rhythm. */
+.desk-log-panel.is-freebuff .desk-log-actions {
+  gap: 1px;
+}
+
+.desk-log-panel.is-freebuff .desk-log-actions .desk-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+}
+
+.desk-freebuff-think,
+.desk-freebuff-think[open] {
+  margin: 4px 0 6px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Exact Agy thinking rhythm: warm gray label, muted neutral body. */
+.desk-freebuff-think > summary {
+  gap: 4px;
+  padding: 3px 0;
+  color: #b6a79d;
+  font-family: var(--sans);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.desk-freebuff-think > summary span {
+  font-weight: 400;
+}
+
+.desk-freebuff-think > summary small {
+  color: #8b817b;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.desk-freebuff-think .desk-think-chev {
+  color: #8b817b;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.desk-freebuff-think[open] .desk-think-chev {
+  transform: rotate(180deg);
+}
+
+.desk-freebuff-think[open] > summary {
+  border-bottom: 0;
+}
+
+.desk-freebuff-think > pre {
+  max-height: none;
+  margin: 9px 0 2px;
+  padding: 12px 14px;
+  overflow: visible;
+  border: 1px solid #222226;
+  border-radius: 11px;
+  color: #a3a1a4;
+  background: #111113;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: deskThinkingIn 0.22s ease-out;
+}
+
+@keyframes deskThinkingIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.desk-tool-card.desk-freebuff-tool {
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid #242126;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.desk-freebuff-tool > summary {
+  min-height: 46px;
+  gap: 9px;
+  padding: 10px 2px;
+  border-radius: 8px;
+}
+
+.desk-freebuff-tool > summary:hover {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.desk-freebuff-tool .desk-tool-check {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: #8ce0a4;
+  background: #17281f;
+}
+
+.desk-freebuff-tool .desk-tool-check.running {
+  color: #e8b175;
+  background: #281d14;
+}
+
+.desk-freebuff-tool .desk-tool-terminal {
+  width: 30px;
+  height: 24px;
+  justify-content: center;
+  border-radius: 7px;
+  color: #83d69d;
+  background: #18231e;
+}
+
+.desk-freebuff-tool strong {
+  color: #eae4ee;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.desk-freebuff-tool code {
+  color: #918a95;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.desk-freebuff-tool small {
+  color: #6f6878;
+  font-size: 9px;
+}
+
+.desk-freebuff-tool .desk-tool-lines {
+  padding: 0;
+  border-radius: 0;
+  color: #6f6878;
+  background: transparent;
+  font-size: 9px;
+}
+
+.desk-freebuff-tool[open] > summary {
+  border-bottom: 0;
+}
+
+.desk-freebuff-tool-detail {
+  margin: 0 0 10px;
+  overflow: hidden;
+  border-top: 0;
+  border-radius: 12px;
+}
+
+.desk-freebuff-toolbar {
+  gap: 10px;
+  padding: 8px 2px 0;
+}
+
+.desk-freebuff-toolbar .tb-item,
+.desk-freebuff-toolbar .tb-item.model,
+.desk-freebuff-toolbar .tb-item.timer {
+  height: auto;
+  min-height: 0;
+  padding: 3px 1px;
+  border: 0;
+  border-radius: 6px;
+  color: #cfc6d6;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+}
+
+.desk-freebuff-toolbar .tb-item:hover,
+.desk-freebuff-toolbar .tb-item.is-open {
+  color: #f2edf5;
+  background: transparent;
+}
+
+.desk-freebuff-toolbar .tb-model-multiplier {
+  padding: 0;
+  color: #8e839b;
+  background: transparent;
+  font-size: 9px;
+}
+
+.desk-freebuff-toolbar .tb-chev {
+  color: #756b80;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-auto {
+  color: #78cf91;
+  font-size: 11px;
+}
+
+@media (max-width: 720px) {
+  .desk-log-head {
+    flex-wrap: nowrap;
+    align-items: center;
+    row-gap: 0;
+    padding: 12px 12px;
+  }
+
+  .desk-log-title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .desk-log-title strong {
+    max-width: 100%;
+  }
+
+  .desk-log-actions {
+    flex: none;
+  }
+
+  .desk-freebuff-toolbar .tb-item.model span:first-child {
+    max-width: 150px;
+  }
+}
+
+/* Agy's conversation primitives, copied one-to-one: user bubble, plain
+   assistant prose, flat tool list, thinking card, composer and toolbar. */
+.desk-freebuff-session {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.desk-freebuff-msg {
+  max-width: 84%;
+  margin: 10px 0;
+  gap: 4px;
+}
+
+.desk-freebuff-msg p {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(242, 118, 58, 0.28);
+  border-radius: 16px 16px 5px 16px;
+  color: #f6e9e0;
+  background: linear-gradient(180deg, #2a1c14, #241811);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.58;
+  letter-spacing: -0.1px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desk-freebuff-msg-meta {
+  display: flex;
+  align-items: center;
+  padding: 2px 2px 4px 0;
+  color: #6d696c;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.desk-freebuff-msg-meta time {
+  color: #6d696c;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.desk-freebuff-agent {
+  margin: 11px 2px 3px;
+  padding: 0;
+}
+
+.desk-freebuff-agent .desk-transcript-md {
+  color: #e3e0da;
+  font-size: 13.5px;
+  line-height: 1.72;
+  letter-spacing: -0.05px;
+}
+
+.desk-freebuff-agent .desk-transcript-md :not(pre) > code {
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 5px;
+  color: #e2c3a8;
+  background: #282828;
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.desk-freebuff-agent .desk-transcript-md a {
+  color: #93b4ff;
+}
+
+.desk-tool-card.desk-freebuff-tool {
+  border-bottom: 1px solid #1d1d20;
+}
+
+.desk-freebuff-tool > summary {
+  min-height: 0;
+  gap: 10px;
+  padding: 13px 0;
+}
+
+.desk-freebuff-tool > summary:hover {
+  background: transparent;
+}
+
+.desk-freebuff-tool .desk-tool-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  color: #4bd68b;
+  background: rgba(75, 214, 139, 0.11);
+}
+
+.desk-freebuff-tool .desk-tool-check.running {
+  color: #f0a33d;
+  background: rgba(240, 163, 61, 0.11);
+}
+
+.desk-freebuff-tool .desk-tool-terminal {
+  width: 22px;
+  height: 22px;
+  justify-content: center;
+  border-radius: 6px;
+  color: #8f8c92;
+  background: #1b1b1e;
+}
+
+.desk-freebuff-tool strong {
+  color: #d4d0ca;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.desk-freebuff-tool code {
+  color: #bdb9b4;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.desk-freebuff-tool small {
+  color: #626062;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.desk-freebuff-tool .desk-tool-chev {
+  color: #5c5b5f;
+  opacity: 0.5;
+}
+
+.desk-freebuff-tool-detail {
+  margin: 0;
+  padding: 0 0 12px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.desk-freebuff-tool-label {
+  margin: 0 0 5px 2px;
+  padding: 0;
+  border: 0;
+  color: #5f5c62;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.desk-freebuff-tool-label:not(:first-child) {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.desk-freebuff-tool-detail pre {
+  max-height: 320px;
+  margin: 0 0 10px;
+  padding: 11px 13px;
+  overflow: auto;
+  border: 1px solid #232327;
+  border-radius: 10px;
+  color: #a8a4a0;
+  background: #121213;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.desk-freebuff-tool-detail pre.desk-freebuff-tool-output {
+  max-height: 260px;
+}
+
+.desk-freebuff-think,
+.desk-freebuff-think[open] {
+  margin: 0;
+  padding: 14px 0 10px;
+}
+
+.desk-freebuff-toolbar {
+  gap: 2px;
+  padding: 9px 2px 0;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-center {
+  gap: 2px;
+  margin: 0 auto;
+}
+
+.desk-freebuff-toolbar .tb-item {
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  color: #a5a2a7;
+  font-size: 11.5px;
+}
+
+.desk-freebuff-toolbar .tb-item.model {
+  color: #d8d5d0;
+  font-weight: 500;
+}
+
+.desk-freebuff-toolbar .tb-item:hover {
+  color: #e2dfda;
+  background: #161618;
+}
+
+.desk-freebuff-toolbar .tb-item.timer {
+  gap: 7px;
+  padding-right: 4px;
+  color: #b9b6b1;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.desk-freebuff-toolbar .tb-chev {
+  color: #6c6970;
+}
+
+.desk-freebuff-toolbar .tb-model-multiplier {
+  padding: 0;
+  color: #a5a2a7;
+  background: transparent;
+  font-size: 10px;
+}
+
+.desk-freebuff-toolbar .desk-freebuff-auto {
+  color: #6fca87;
+  font-size: 11.5px;
+}
+
+.desk-freebuff-compose-shell {
+  border: 1px solid #303033;
+  border-radius: 22px;
+  background: #191919;
+}
+
+.desk-freebuff-compose-shell:focus-within {
+  border-color: #45454a;
+  box-shadow: 0 0 0 3px rgba(242, 118, 58, 0.06);
+}
+
+.desk-freebuff-compose-shell .composer {
+  padding: 7px 7px 7px 12px;
+}
+
+.desk-freebuff-compose-shell .composer textarea {
+  max-height: 132px;
+  color: #eee;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.desk-freebuff-compose-shell .composer textarea::placeholder {
+  color: #7f7e80;
+}
+
+.desk-freebuff-compose-shell .plus-btn {
+  width: 28px;
+  height: 28px;
+  color: #8a878d;
+}
+
+.desk-freebuff-compose-shell .send-btn {
+  width: 34px;
+  height: 34px;
+  color: #c9c6c2;
+  background: #2b2b2e;
+}
+
+.desk-freebuff-compose-shell .send-btn:disabled {
+  color: #b9b6b1;
+  background: #2b2b2e;
+}
+
+/* Agy header hierarchy: a real title with a small mono worktree line. */
+.desk-log-panel.is-freebuff {
+  border-left-color: #202023;
+  background: #0a0a0a;
+}
+
+.desk-log-panel.is-freebuff .desk-log-head {
+  border-bottom-color: #202023;
+}
+
+.desk-log-panel.is-freebuff .desk-log-title strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.desk-log-panel.is-freebuff .desk-log-title span:not(.desk-agent-badge) {
+  color: #7a737d;
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+/* Render reasoning as prose, not raw markdown in a <pre>. */
+.desk-freebuff-think-body {
+  max-height: none;
+  margin: 9px 0 2px;
+  padding: 12px 14px;
+  overflow: visible;
+  border: 1px solid #222226;
+  border-radius: 11px;
+  background: #111113;
+  animation: deskThinkingIn 0.22s ease-out;
+}
+
+.desk-freebuff-think-body .desk-transcript-md {
+  color: #a3a1a4;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.75;
+  letter-spacing: -0.05px;
+}
+
+.desk-freebuff-think-body .desk-transcript-md :not(pre) > code {
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 5px;
+  color: #d8c2ad;
+  background: #262629;
+}
+
+.desk-log-panel.is-freebuff .desk-log-head,
+.desk-log-panel.is-freebuff .desk-log-meta {
+  background: #0a0a0a;
+}
+
+/* Role markers for coordinator-led teams. */
+.desk-role {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid #353238;
+  border-radius: 999px;
+  color: #b9b4ba;
+  background: #1d1c20;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.desk-role.coordinator {
+  border-color: #4a3427;
+  color: #f0b07c;
+  background: #241a13;
+}
+
+.desk-role.worker {
+  border-color: #2b4050;
+  color: #9ac8e8;
+  background: #14212b;
+}
+
+.desk-log-title strong .desk-role {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+/* Agent rows under each worktree make the coordinator/worker split visible. */
+.desk-worktree-group {
+  margin: 2px 0 5px;
+}
+
+.desk-worktree-group:last-child {
+  margin-bottom: 0;
+}
+
+.desk-side-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 0 12px;
+  padding: 2px 0 3px 9px;
+  border-left: 1px solid #302a31;
+}
+
+.desk-side-agent {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 7px;
+  color: #928c95;
+  background: transparent;
+  text-align: left;
+}
+
+.desk-side-agent:hover {
+  color: #eee8f0;
+  background: #19181c;
+}
+
+.desk-side-agent .desk-agent-badge {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 6px;
+}
+
+.desk-side-agent .desk-agent-badge .agent-logo {
+  width: 12px;
+  height: 12px;
+}
+
+.desk-side-agent-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.desk-side-agent-main strong {
+  display: block;
+  color: #c9c3cc;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.desk-side-agent-main small {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  color: #736d76;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desk-side-agent .desk-role {
+  flex: none;
+  padding: 1px 5px;
+  font-size: 8px;
+}
+
+.desk-side-agent .desk-state {
+  flex: none;
+  padding: 2px 5px;
+  font-size: 8px;
+}
+
+.desk-side-agent.working .desk-side-agent-main strong {
+  color: #dfe9df;
+}
+
+/* Freebuff hides its `41m left` footer while a turn is running. The toolbar
+   keeps the last observed value; this state is used only before one exists. */
+.desk-freebuff-toolbar .tb-item.timer.time-error {
+  color: #d98a78;
+}
+
+.desk-freebuff-toolbar .tb-item.timer.time-error .timer-ring {
+  animation: none;
+  opacity: 0.9;
+}
+
+.usage-sub.is-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #d98a78;
+}
+
+/* Agent handoff sheet */
+.desk-handoff .sheet-sub {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desk-handoff-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 12px 12px;
+}
+
+.desk-handoff-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #8b838d;
+  font-size: 10px;
+}
+
+.desk-handoff-field > span {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: #9a929c;
+}
+
+.desk-handoff-field .select-menu,
+.desk-handoff-field .select-trigger {
+  width: 100%;
+}
+
+.desk-handoff-field textarea {
+  width: 100%;
+  min-height: 176px;
+  padding: 9px 10px;
+  resize: vertical;
+  border: 1px solid #302e33;
+  border-radius: 8px;
+  outline: 0;
+  color: #dbd3cb;
+  background: #0c0c0e;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.65;
+}
+
+.desk-handoff-field textarea:focus {
+  border-color: #5b3a28;
+}
+
+.desk-handoff-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #736d76;
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.desk-handoff-empty,
+.desk-handoff-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid #3a2d22;
+  border-radius: 7px;
+  color: #bda88f;
+  background: #211b16;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.desk-handoff-empty svg,
+.desk-handoff-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.desk-handoff-error {
+  border-color: #4a2823;
+  color: #e9a28f;
+  background: #2a1714;
+}
+
+.desk-handoff-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.desk-handoff-actions .desk-btn {
+  height: 32px;
 }

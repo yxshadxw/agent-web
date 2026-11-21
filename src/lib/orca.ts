@@ -2,9 +2,11 @@ export type OrcaAgent = {
   id: string;
   orcaSessionId: string | null;
   agent: string;
+  kind?: 'chat' | 'terminal' | null;
   state: string;
   title: string;
   prompt: string;
+  role?: 'coordinator' | 'worker' | null;
   worktreeId: string;
   repo: string;
   path: string;
@@ -79,6 +81,8 @@ export type TranscriptEntry = {
   kind: string;
   role?: 'user' | 'assistant' | 'system';
   text?: string;
+  name?: string;
+  state?: string;
 };
 
 export type TranscriptPayload = {
@@ -107,6 +111,29 @@ export type TerminalSnapshot = {
   limited: boolean;
   returnedLineCount: number;
   fetchedAt: string;
+  error?: string;
+};
+
+export type FreebuffSessionEntry =
+  | { kind: 'message'; role: 'user' | 'assistant'; text: string; at?: string }
+  | { kind: 'thinking'; text: string; at?: string }
+  | {
+      kind: 'tool';
+      name: string;
+      command: string;
+      output?: string;
+      running?: boolean;
+      at?: string;
+    };
+
+export type FreebuffSessionPayload = {
+  ok: boolean;
+  chatId?: string;
+  updatedAt?: number;
+  state?: string;
+  entries: FreebuffSessionEntry[];
+  truncated?: boolean;
+  fetchedAt?: string;
   error?: string;
 };
 
@@ -206,6 +233,12 @@ export type TerminalCreateResult = {
   error?: string;
 };
 
+export type FreebuffContinueResult = TerminalCreateResult & {
+  previousHandle: string | null;
+  chatId?: string | null;
+  warning?: string | null;
+};
+
 export type AttachmentResult = {
   ok: boolean;
   path: string;
@@ -236,6 +269,9 @@ export type LaunchResult = {
     path: string;
     isolate: boolean;
     handle?: string | null;
+    sessionId?: string | null;
+    kind?: string | null;
+    surface?: string | null;
     worktreeId?: string | null;
     error?: string;
   } | null;
@@ -247,6 +283,9 @@ export type LaunchResult = {
     path: string;
     isolate: boolean;
     handle?: string | null;
+    sessionId?: string | null;
+    kind?: string | null;
+    surface?: string | null;
     worktreeId?: string | null;
     error?: string;
   }[];
@@ -288,6 +327,8 @@ export const orcaApi = {
     ),
   transcript: (sessionId: string) =>
     request<TranscriptPayload>(`/transcript?sessionId=${encodeURIComponent(sessionId)}`),
+  freebuffSession: (path: string) =>
+    request<FreebuffSessionPayload>(`/freebuff/session?path=${encodeURIComponent(path)}`),
   addProject: (path: string) =>
     request<{ ok: boolean; path: string; kind: string; overview: OrcaOverview }>('/projects', {
       method: 'POST',
@@ -325,10 +366,15 @@ export const orcaApi = {
       method: 'POST',
       body: JSON.stringify({ path, workflowId, ref }),
     }),
-  commitAndPush: (path: string, message: string, push: boolean) =>
+  commitAndPush: (path: string, message: string, push: boolean, pushOnly = false) =>
     request<CommitResult>('/github/commit', {
       method: 'POST',
-      body: JSON.stringify({ path, message, push }),
+      body: JSON.stringify({ path, message, push, pushOnly }),
+    }),
+  sendTerminalKey: (handle: string, key: 'up' | 'down' | 'left' | 'right' | 'enter' | 'escape' | 'tab') =>
+    request<{ ok: boolean; handle: string; key: string; error?: string }>('/terminal/key', {
+      method: 'POST',
+      body: JSON.stringify({ handle, key }),
     }),
   closeTerminal: (handle: string) =>
     request<{ ok: boolean; handle: string; overview: OrcaOverview }>('/terminal/close', {
@@ -353,6 +399,11 @@ export const orcaApi = {
     request<TerminalCreateResult>('/terminal/create', {
       method: 'POST',
       body: JSON.stringify({ path, title }),
+    }),
+  continueFreebuff: (body: { path: string; handle?: string | null; chatId?: string | null }) =>
+    request<FreebuffContinueResult>('/freebuff/continue', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   attach: (file: { name: string; data: string }) =>
     request<AttachmentResult>('/attachment', {

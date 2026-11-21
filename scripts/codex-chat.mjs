@@ -4,6 +4,64 @@ const CODEX_BIN = process.env.CODEX_BIN || 'codex';
 const MAX_BODY = 1024 * 1024;
 const MAX_PROMPT = 20_000;
 const TURN_TIMEOUT = 5 * 60_000;
+const MAX_TOOLS = 80;
+const MAX_TOOL_TEXT = 12_000;
+
+function asText(value) {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map(asText).filter(Boolean).join('\n');
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return '';
+    }
+  }
+  return String(value);
+}
+
+function codexToolRecord(item, eventType) {
+  const type = asText(item?.type) || 'tool';
+  let name = type;
+  let command = '';
+  if (type === 'command_execution') {
+    name = 'bash';
+    command = asText(item.command);
+  } else if (type === 'file_change') {
+    name = 'edit';
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    command = changes.map((change) => asText(change?.path || change)).filter(Boolean).join('\n');
+  } else if (type === 'mcp_tool_call') {
+    name = [item.server, item.tool].map(asText).filter(Boolean).join('/') || 'mcp';
+    command = asText(item.arguments);
+  } else if (type === 'web_search') {
+    name = 'web';
+    command = asText(item.query);
+  } else {
+    name = asText(item.name) || type;
+    command = asText(item.command ?? item.query ?? item.path ?? item.arguments ?? '');
+  }
+  const status =
+    asText(item.status) ||
+    (eventType === 'item.completed'
+      ? item.exit_code === 0
+        ? 'completed'
+        : item.exit_code != null
+          ? 'failed'
+          : 'completed'
+      : 'running');
+  const output = asText(item.aggregated_output ?? item.output ?? item.result ?? '');
+  return {
+    id: asText(item.id),
+    type,
+    name,
+    command: command.slice(0, 4_000),
+    status,
+    output: output.slice(0, MAX_TOOL_TEXT),
+  };
+}
 
 function send(res, status, body) {
   if (res.writableEnded) return;
@@ -104,6 +162,7 @@ function runCodex(prompt, threadId, root, options = {}) {
     let reasoning = '';
     let usage = null;
     let failure = null;
+    const toolsById = new Map();
     let finished = false;
 
     const finish = (error) => {
@@ -118,6 +177,7 @@ function runCodex(prompt, threadId, root, options = {}) {
         threadId: resolvedThread,
         text: text.trim(),
         reasoning: reasoning.trim(),
+        tools: [...toolsById.values()],
         usage,
       });
     };
@@ -139,12 +199,38 @@ function runCodex(prompt, threadId, root, options = {}) {
       if (event.type === 'thread.started' && event.thread_id) {
         resolvedThread = event.thread_id;
       }
+      if (
+        (event.type === 'item.started' ||
+          event.type === 'item.updated' ||
+          event.type === 'item.completed') &&
+        event.item
+      ) {
+        const type = asText(event.item.type);
+        if (type && type !== 'agent_message' && type !== 'reasoning') {
+          const key = asText(event.item.id) || `${type}:${toolsById.size}`;
+          const previous = toolsById.get(key);
+          const next = codexToolRecord(event.item, event.type);
+          toolsById.set(key, {
+            ...previous,
+            ...next,
+            id: next.id || previous?.id || key,
+            command: next.command || previous?.command || '',
+            output: next.output || previous?.output || '',
+          });
+          while (toolsById.size > MAX_TOOLS) {
+            const oldest = toolsById.keys().next().value;
+            if (!oldest) break;
+            toolsById.delete(oldest);
+          }
+        }
+      }
       if (event.type === 'item.completed' && event.item) {
-        if (event.item.type === 'agent_message' && event.item.text) {
-          text += `${event.item.text}\n`;
+        if (event.item.type === 'agent_message') {
+          const message = asText(event.item.text || event.item.summary);
+          if (message) text += `${message}\n`;
         }
         if (event.item.type === 'reasoning') {
-          const thought = event.item.text || event.item.summary || '';
+          const thought = asText(event.item.text || event.item.summary);
           if (thought) reasoning += `${thought}\n`;
         }
       }
@@ -180,6 +266,93 @@ function runCodex(prompt, threadId, root, options = {}) {
   });
 }
 
+let quotaCache = null;
+
+function readCodexQuota() {
+  if (quotaCache && Date.now() - quotaCache.at < 20_000) return quotaCache.value;
+  const value = new Promise((resolve, reject) => {
+    const child = spawn(CODEX_BIN, ['app-server', '--listen', 'stdio://'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env,
+    });
+    let buffer = '';
+    let settled = false;
+    let stderr = '';
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill('SIGTERM');
+      quotaCache = error ? null : { at: Date.now(), value };
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const send = (payload) => {
+      if (settled || child.stdin.destroyed) return;
+      child.stdin.write(`${JSON.stringify(payload)}\n`);
+    };
+    const timer = setTimeout(() => finish(new Error('Codex 한도 응답 시간이 초과됐습니다.')), 15_000);
+    child.on('error', (error) => finish(error));
+    child.stderr.on('data', (chunk) => {
+      stderr = `${stderr}${chunk.toString()}`.slice(-4_000);
+    });
+    child.on('close', (code) => {
+      if (!settled) finish(new Error(stderr.trim() || `Codex app-server exited ${code}`));
+    });
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const raw = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!raw) continue;
+        let message;
+        try {
+          message = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (message.id === 1 && message.result) {
+          send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+          send({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read', params: {} });
+          continue;
+        }
+        if (message.id !== 2) continue;
+        if (message.error) {
+          finish(new Error(message.error.message || 'Codex 계정 한도를 읽지 못했습니다.'));
+          return;
+        }
+        const result = message.result || {};
+        const snapshot =
+          result.rateLimitsByLimitId?.codex || result.rateLimits || null;
+        if (!snapshot) {
+          finish(new Error('Codex가 계정 한도를 반환하지 않았습니다.'));
+          return;
+        }
+        finish(null, {
+          plan: snapshot.planType || null,
+          primary: snapshot.primary || null,
+          secondary: snapshot.secondary || null,
+          credits: snapshot.credits || null,
+          ordinaryUsageAllowed: result.ordinaryUsageAllowed ?? null,
+          fetchedAt: Date.now(),
+        });
+      }
+    });
+    send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { clientInfo: { name: 'agent-web', version: '1.0.0' } },
+    });
+  });
+  quotaCache = { at: Date.now(), value };
+  value.catch(() => {
+    if (quotaCache?.value === value) quotaCache = null;
+  });
+  return value;
+}
+
 let healthCache = null;
 
 async function health() {
@@ -203,6 +376,14 @@ export function createCodexHandler({ root, workingRoot = process.cwd() }) {
     if (req.method === 'GET' && path === '/health') {
       try {
         return send(res, 200, { ...(await health()), workspace: workingRoot });
+      } catch (error) {
+        return send(res, 503, { ok: false, error: error.message });
+      }
+    }
+
+    if (req.method === 'GET' && path === '/quota') {
+      try {
+        return send(res, 200, { ok: true, ...(await readCodexQuota()) });
       } catch (error) {
         return send(res, 503, { ok: false, error: error.message });
       }

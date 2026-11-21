@@ -7,7 +7,7 @@
  */
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -19,6 +19,7 @@ const ORCA_BIN = process.env.ORCA_BIN || 'orca';
 const CREDENTIALS_PATH =
   process.env.FREEBUFF_CREDENTIALS ||
   join(homedir(), '.config', 'manicode', 'credentials.json');
+const FREEBUFF_PROJECTS_DIR = join(homedir(), '.config', 'manicode', 'projects');
 const FREEBUFF_BASE = 'https://www.codebuff.com';
 const ORCA_TIMEOUT = 30_000;
 const MAX_BODY = 1_000_000;
@@ -26,6 +27,11 @@ const MAX_ATTACHMENT_BODY = 30 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const ATTACHMENT_DIR = join(tmpdir(), 'agent-web-attachments');
 const CACHE_MS = 2_500;
+const FREEBUFF_SESSION_MESSAGE_LIMIT = 80;
+const FREEBUFF_SESSION_ENTRY_LIMIT = 1_000;
+const FREEBUFF_SESSION_TEXT_MAX = 120_000;
+const FREEBUFF_SESSION_OUTPUT_MAX = 60_000;
+const freebuffSessionCache = new Map();
 
 let overviewCache = null;
 let overviewCacheAt = 0;
@@ -70,8 +76,8 @@ const COMMON_RULES = `[Agent Desk 공통 지시 — 반드시 준수]
 - 코드베이스 구조나 관계를 물을 때는 graphify를 먼저 사용하고, graphify-out이 없으면 관련 파일만 좁혀 읽어 토큰을 아끼세요.
 - 전체 파일·전체 로그·전체 diff를 반복해서 읽지 말고, 검색 결과와 필요한 줄 범위만 읽으세요.
 - 다른 작업자와 협업할 때는 Orca orchestration 메시지를 사용하고, 가능하면 결과에 누가 무엇을 했는지 남기세요.
-- 같은 파일을 여러 워커가 동시에 수정하지 마세요. 충돌 가능성이 있으면 지휘자에게 먼저 알리세요.
-- 커밋·푸시는 사용자가 요청한 경우에만 하고, 푸시 충돌 시 강제 푸시하지 말고 지휘자에게 충돌 해결 메시지를 보내세요.
+- 같은 파일을 여러 워커가 동시에 수정하지 마세요. 충돌 가능성이 있으면 코디네이터에게 먼저 알리세요.
+- 커밋·푸시는 사용자가 요청한 경우에만 하고, 푸시 충돌 시 강제 푸시하지 말고 코디네이터에게 충돌 해결 메시지를 보내세요.
 - 작업이 끝나면 변경 사항과 검증 결과를 짧게 요약하세요.`;
 
 function agentPrompt(prompt) {
@@ -196,14 +202,35 @@ function normalizeAgent(agent, worktree, terminal, index) {
     terminal?.title ||
     agent?.prompt ||
     '이름 없는 에이전트';
+  const prompt = String(agent?.prompt || '').trimStart();
+  const roleSource = `${prompt}\n${String(agent?.title || '').trimStart()}`;
+  const role = prompt.startsWith('[워커 역할]')
+    ? 'worker'
+    : prompt.startsWith('[코디네이터 역할]') || prompt.startsWith('[지휘자 역할]')
+      ? 'coordinator'
+      : /\[워커 역할\]/.test(roleSource)
+        ? 'worker'
+        : /\[(코디네이터|지휘자) 역할\]/.test(roleSource)
+          ? 'coordinator'
+          : null;
+
+  const kind =
+    agent?.kind === 'chat' ||
+    String(agent?.paneKey || '').startsWith('structured-agent-session-')
+      ? 'chat'
+      : agent?.kind === 'terminal' || terminal
+        ? 'terminal'
+        : null;
 
   return {
     id: agent?.orcaSessionId || paneKey || fallbackId,
     orcaSessionId: agent?.orcaSessionId || null,
     agent: agent?.agentType || agent?.agent || 'agent',
+    kind,
     state: normalizeState(agent?.state),
     title,
     prompt: agent?.prompt || '',
+    role,
     worktreeId: worktree.id,
     repo: worktree.repo,
     path: worktree.path,
@@ -239,7 +266,13 @@ function normalizeWorktree(raw, flatAgents, terminalMap) {
         index,
       );
     })
-    .filter((agent) => agent.terminalHandle || agent.state === 'working');
+    .filter(
+      (agent) =>
+        agent.terminalHandle ||
+        agent.state === 'working' ||
+        agent.state === 'waiting' ||
+        (agent.kind === 'chat' && Boolean(agent.role)),
+    );
 
   agents.sort((a, b) => {
     const rank = (state) => (state === 'working' ? 0 : state === 'waiting' ? 1 : 2);
@@ -516,24 +549,18 @@ async function githubInfo(worktree) {
 }
 
 function findCoordinator(overview) {
-  return (
-    overview.agents.find(
-      (agent) =>
-        /지휘자/.test(agent.title || '') ||
-        /\[지휘자 역할\]/.test(agent.prompt || ''),
-    ) || null
-  );
+  return overview.agents.find((agent) => agent.role === 'coordinator') || null;
 }
 
 async function notifyConflict(worktree, pushError) {
   const overview = await getOverview(true);
   const coordinator = findCoordinator(overview);
   if (!coordinator) {
-    return { notified: false, reason: '등록된 지휘자를 찾지 못했습니다.' };
+    return { notified: false, reason: '등록된 코디네이터를 찾지 못했습니다.' };
   }
   const to = coordinator.terminalHandle || (coordinator.orcaSessionId ? `orca_session_id:${coordinator.orcaSessionId}` : '');
   if (!to) {
-    return { notified: false, reason: '지휘자에게 연결된 세션이나 터미널이 없습니다.' };
+    return { notified: false, reason: '코디네이터에게 연결된 세션이나 터미널이 없습니다.' };
   }
 
   const subject = `[충돌] ${worktree.displayName} git push 실패`;
@@ -581,7 +608,8 @@ async function notifyConflict(worktree, pushError) {
 async function commitAndPush(body) {
   const worktree = await resolveWorktreePath(body?.path);
   const message = typeof body?.message === 'string' ? body.message.trim() : '';
-  if (!message) throw new Error('커밋 메시지를 입력해 주세요.');
+  const pushOnly = Boolean(body?.pushOnly);
+  if (!message && !pushOnly) throw new Error('커밋 메시지를 입력해 주세요.');
   if (message.length > 200) throw new Error('커밋 메시지는 200자 이하로 입력해 주세요.');
 
   const status = await runCommand('git', ['status', '--porcelain'], {
@@ -589,17 +617,20 @@ async function commitAndPush(body) {
     timeout: 15_000,
   });
   const changed = status.stdout.split('\n').filter(Boolean);
-  if (changed.length === 0) throw new Error('커밋할 변경 사항이 없습니다.');
+  if (changed.length === 0 && !body?.push) throw new Error('커밋할 변경 사항이 없습니다.');
+  if (changed.length > 0 && !message) throw new Error('커밋 메시지를 입력해 주세요.');
 
-  await runCommand('git', ['add', '-A'], { cwd: worktree.path, timeout: 20_000 });
-  let commit;
-  try {
-    commit = await runCommand('git', ['commit', '-m', message], {
-      cwd: worktree.path,
-      timeout: 30_000,
-    });
-  } catch (error) {
-    throw new Error(`커밋에 실패했습니다: ${errorMessage(error)}`);
+  let commit = null;
+  if (changed.length > 0) {
+    await runCommand('git', ['add', '-A'], { cwd: worktree.path, timeout: 20_000 });
+    try {
+      commit = await runCommand('git', ['commit', '-m', message], {
+        cwd: worktree.path,
+        timeout: 30_000,
+      });
+    } catch (error) {
+      throw new Error(`커밋에 실패했습니다: ${errorMessage(error)}`);
+    }
   }
 
   const hash = await runCommand('git', ['rev-parse', '--short', 'HEAD'], {
@@ -614,7 +645,12 @@ async function commitAndPush(body) {
   let conflictNotice = null;
   if (body?.push) {
     try {
-      await runCommand('git', ['push'], { cwd: worktree.path, timeout: 60_000 });
+      // Set the upstream as well. This also handles a freshly committed branch
+      // that has no upstream yet, which previously blocked pushes to main.
+      await runCommand('git', ['push', '-u', 'origin', 'HEAD'], {
+        cwd: worktree.path,
+        timeout: 60_000,
+      });
       pushed = true;
     } catch (error) {
       pushError = errorMessage(error);
@@ -631,9 +667,9 @@ async function commitAndPush(body) {
   invalidateOverview();
   return {
     ok: !pushError,
-    committed: true,
+    committed: Boolean(commit),
     pushed,
-    commit: { hash, message },
+    commit: commit ? { hash, message } : null,
     files: changed.length,
     pushError,
     conflictNotice,
@@ -869,7 +905,7 @@ async function readTerminal(handle, { cursor, limit, screen }) {
   if (!/^term_[a-zA-Z0-9-]+$/.test(handle)) {
     throw new Error('터미널 핸들이 올바르지 않습니다.');
   }
-  const safeLimit = Math.max(40, Math.min(2000, Number(limit) || 800));
+  const safeLimit = Math.max(40, Math.min(5000, Number(limit) || 800));
   const args = ['terminal', 'read', '--terminal', handle, '--limit', String(safeLimit), '--json'];
   if (screen) args.push('--screen');
   else if (cursor) args.push('--cursor', String(cursor));
@@ -910,6 +946,187 @@ async function readTerminal(handle, { cursor, limit, screen }) {
     returnedLineCount: terminal.returnedLineCount ?? tail.length,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+// The Freebuff TUI only exposes the current 30-40 row viewport, hard-wrapped
+// and cut off mid-command. Freebuff keeps the authoritative turn in its own
+// chat store, where every reasoning block and every tool call still has its
+// complete multiline command and output. Read that instead of scraping rows.
+function clipFreebuffSessionText(value, max) {
+  const text = typeof value === 'string' ? value : '';
+  if (text.length <= max) return text;
+  const omitted = text.length - max;
+  return `${text.slice(0, max)}\n\n… (${omitted.toLocaleString('ko-KR')}자 생략)`;
+}
+
+function freebuffToolCommand(input) {
+  if (typeof input === 'string') return input;
+  if (!input || typeof input !== 'object') return '';
+  for (const key of ['command', 'cmd', 'script']) {
+    if (typeof input[key] === 'string' && input[key].trim()) return input[key];
+  }
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return String(input);
+  }
+}
+
+function normalizeFreebuffSessionEntries(messages) {
+  const entries = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const variant = String(message.variant || message.role || '');
+    const content = typeof message.content === 'string' ? message.content : '';
+    const at = typeof message.timestamp === 'string' ? message.timestamp : undefined;
+    if (variant === 'user') {
+      if (content.trim()) {
+        entries.push({
+          kind: 'message',
+          role: 'user',
+          at,
+          text: clipFreebuffSessionText(content, FREEBUFF_SESSION_TEXT_MAX),
+        });
+      }
+      continue;
+    }
+    const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+    if (!blocks.length) {
+      if (content.trim()) {
+        entries.push({
+          kind: 'message',
+          role: 'assistant',
+          at,
+          text: clipFreebuffSessionText(content, FREEBUFF_SESSION_TEXT_MAX),
+        });
+      }
+      continue;
+    }
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+      const type = String(block.type || '');
+      if (type === 'text') {
+        const text = typeof block.content === 'string' ? block.content : '';
+        if (!text.trim()) continue;
+        if (block.textType === 'reasoning' || block.textType === 'thinking') {
+          entries.push({ kind: 'thinking', at, text: clipFreebuffSessionText(text, FREEBUFF_SESSION_TEXT_MAX) });
+        } else {
+          entries.push({
+            kind: 'message',
+            role: 'assistant',
+            at,
+            text: clipFreebuffSessionText(text, FREEBUFF_SESSION_TEXT_MAX),
+          });
+        }
+        continue;
+      }
+      if (type === 'tool' || block.toolName) {
+        const output =
+          typeof block.output === 'string'
+            ? block.output
+            : block.output == null
+              ? ''
+              : JSON.stringify(block.output);
+        entries.push({
+          kind: 'tool',
+          at,
+          name: String(block.toolName || block.name || 'tool'),
+          command: freebuffToolCommand(block.input),
+          output: clipFreebuffSessionText(output, FREEBUFF_SESSION_OUTPUT_MAX),
+          running: block.output == null && !block.error,
+        });
+      }
+    }
+  }
+  return entries;
+}
+
+function freebuffProjectDirForPath(worktreePath) {
+  const root = resolve(FREEBUFF_PROJECTS_DIR);
+  const dir = resolve(join(root, basename(worktreePath)));
+  if (dirname(dir) !== root) throw new Error('Freebuff 프로젝트 경로가 올바르지 않습니다.');
+  return dir;
+}
+
+function findFreebuffChat(projectDir, requestedChat) {
+  // Freebuff keeps sessions in <project>/chats/<timestamp>/; older builds
+  // wrote them directly under <project>/. Check both layouts.
+  const roots = [join(projectDir, 'chats'), projectDir].filter((dir) => existsSync(dir));
+  const wanted = typeof requestedChat === 'string' ? requestedChat.trim() : '';
+  if (wanted) {
+    if (!/^[A-Za-z0-9._-]+$/.test(wanted) || wanted.includes('..')) {
+      throw new Error('Freebuff 세션 ID가 올바르지 않습니다.');
+    }
+    for (const root of roots) {
+      const file = join(root, wanted, 'chat-messages.json');
+      if (existsSync(file)) return { chatId: wanted, file };
+    }
+    throw new Error('선택한 Freebuff 세션을 찾지 못했습니다.');
+  }
+  let chosen = null;
+  for (const root of roots) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^\d{4}-\d{2}-\d{2}T[A-Za-z0-9.:-]+$/.test(entry.name)) continue;
+      const file = join(root, entry.name, 'chat-messages.json');
+      if (!existsSync(file)) continue;
+      const info = statSync(file);
+      if (!chosen || info.mtimeMs > chosen.mtimeMs) {
+        chosen = { chatId: entry.name, file, mtimeMs: info.mtimeMs };
+      }
+    }
+  }
+  if (!chosen) throw new Error('Freebuff 세션 기록이 아직 없습니다.');
+  return chosen;
+}
+
+async function readFreebuffSession(rawPath, requestedChat) {
+  const worktree = await resolveWorktreePath(rawPath);
+  const projectDir = freebuffProjectDirForPath(worktree.path);
+  if (!existsSync(projectDir)) {
+    return {
+      ok: false,
+      entries: [],
+      error: '이 워크트리의 Freebuff 세션 기록을 찾지 못했습니다.',
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+  const chat = findFreebuffChat(projectDir, requestedChat);
+  const fileStat = statSync(chat.file);
+  const cached = freebuffSessionCache.get(chat.file);
+  if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
+    return { ...cached.payload, fetchedAt: new Date().toISOString() };
+  }
+  const parsed = JSON.parse(readFileSync(chat.file, 'utf8'));
+  const messages = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.messages)
+      ? parsed.messages
+      : [];
+  const replayed = normalizeFreebuffSessionEntries(
+    messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT),
+  );
+  const entries = replayed.slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
+  const last = messages[messages.length - 1];
+  const payload = {
+    ok: true,
+    chatId: chat.chatId,
+    updatedAt: fileStat.mtimeMs,
+    state: last && last.isComplete === false ? 'working' : 'idle',
+    entries,
+    truncated:
+      replayed.length > entries.length || messages.length > FREEBUFF_SESSION_MESSAGE_LIMIT,
+    fetchedAt: new Date().toISOString(),
+  };
+  freebuffSessionCache.set(chat.file, {
+    mtimeMs: fileStat.mtimeMs,
+    size: fileStat.size,
+    payload,
+  });
+  if (freebuffSessionCache.size > 24) {
+    const first = freebuffSessionCache.keys().next().value;
+    if (first) freebuffSessionCache.delete(first);
+  }
+  return payload;
 }
 
 async function readTranscript(sessionId) {
@@ -1032,6 +1249,27 @@ async function sendTerminalMessage(body) {
   return { ok: true, handle, result };
 }
 
+async function sendTerminalKey(body) {
+  const handle = typeof body?.handle === 'string' ? body.handle.trim() : '';
+  const key = typeof body?.key === 'string' ? body.key.trim() : '';
+  const keys = {
+    up: '\u001b[A',
+    down: '\u001b[B',
+    left: '\u001b[D',
+    right: '\u001b[C',
+    enter: '\r',
+    escape: '\u001b',
+    tab: '\t',
+  };
+  const text = keys[key];
+  if (!/^term_[a-zA-Z0-9-]+$/.test(handle)) {
+    throw new Error('키를 보낼 터미널 핸들이 올바르지 않습니다.');
+  }
+  if (!text) throw new Error('지원하지 않는 키입니다.');
+  await runOrca(['terminal', 'send', '--terminal', handle, '--text', text, '--json'], 15_000);
+  return { ok: true, handle, key };
+}
+
 async function interruptTerminal(body) {
   const handle = typeof body?.handle === 'string' ? body.handle.trim() : '';
   if (!/^term_[a-zA-Z0-9-]+$/.test(handle)) {
@@ -1081,6 +1319,66 @@ async function closeTerminal(body) {
   await runOrca(['terminal', 'close', '--terminal', handle, '--json'], 30_000);
   invalidateOverview();
   return { ok: true, handle, overview: await getOverview(true) };
+}
+
+async function continueFreebuff(body) {
+  const worktree = await resolveWorktreePath(body?.path);
+  const previousHandle = typeof body?.handle === 'string' ? body.handle.trim() : '';
+  const requestedChat = typeof body?.chatId === 'string' ? body.chatId.trim() : '';
+  let warning = null;
+  let chatId = '';
+
+  // Passing no id lets Freebuff pick a recent conversation globally, which can
+  // open the wrong worktree's chat (or start fresh). Pin the requested chat to
+  // this worktree before opening `--continue`.
+  if (requestedChat) {
+    chatId = findFreebuffChat(freebuffProjectDirForPath(worktree.path), requestedChat).chatId;
+  }
+
+  // A dead Freebuff terminal often cannot be closed cleanly. Continue anyway:
+  // the important half is opening `--continue` in the same worktree.
+  if (/^term_[a-zA-Z0-9-]+$/.test(previousHandle)) {
+    try {
+      await runOrca(['terminal', 'close', '--terminal', previousHandle, '--json'], 30_000);
+      invalidateOverview();
+    } catch (error) {
+      warning = `이전 터미널 종료 경고: ${errorMessage(error)}`;
+    }
+  }
+
+  const title = `Freebuff continue · ${worktree.displayName || 'worktree'}`;
+  const command = chatId ? `freebuff --continue ${chatId}` : 'freebuff --continue';
+  const result = await runOrca(
+    [
+      'terminal',
+      'create',
+      '--worktree',
+      `path:${worktree.path}`,
+      '--title',
+      title,
+      '--command',
+      command,
+      '--json',
+    ],
+    120_000,
+  );
+  const terminal = result?.terminal || result;
+  const handle = terminal?.handle || result?.handle || '';
+  if (!/^term_[a-zA-Z0-9-]+$/.test(handle)) {
+    throw new Error('이어서 열 터미널의 핸들을 확인하지 못했습니다.');
+  }
+  invalidateOverview();
+  return {
+    ok: true,
+    handle,
+    previousHandle: previousHandle || null,
+    chatId: chatId || null,
+    title,
+    path: worktree.path,
+    warning,
+    terminal,
+    overview: await getOverview(true),
+  };
 }
 
 function readFreebuffCredentials() {
@@ -1240,6 +1538,40 @@ function launchWorktreePath(result) {
   );
 }
 
+function launchKind(result) {
+  const launch = result?.launch || result?.agentLaunch || result || {};
+  return launch?.outcome?.kind || launch?.kind || result?.kind || null;
+}
+
+function launchSessionId(result) {
+  const launch = result?.launch || result?.agentLaunch || result || {};
+  const direct =
+    launch?.outcome?.orcaSessionId ||
+    launch?.outcome?.sessionId ||
+    launch?.orcaSessionId ||
+    launch?.sessionId ||
+    result?.orcaSessionId ||
+    result?.sessionId ||
+    null;
+  if (direct) return direct;
+  // A chat launch may expose its structured-session handle instead of an id.
+  const handle = launch?.outcome?.handle || launch?.handle;
+  const chatLaunch =
+    String(launch?.outcome?.kind || launch?.kind || '')
+      .toLowerCase()
+      .includes('chat') || launch?.outcome?.surface === 'chat';
+  if (chatLaunch && typeof handle === 'string') {
+    return handle.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i)?.[0] || null;
+  }
+  return null;
+}
+
+function launchSurface(agent) {
+  // Agy's native Orca surface is a chat. Terminal surface is what made a
+  // parallel Agy launch show up as a raw CLI and kept its transcript empty.
+  return agent === 'antigravity' ? 'chat' : 'terminal';
+}
+
 function cleanModel(value) {
   const model = typeof value === 'string' ? value.trim() : '';
   if (model.length > 120) throw new Error('모델 ID가 너무 깁니다.');
@@ -1248,6 +1580,7 @@ function cleanModel(value) {
 
 async function launchOne({ worktree, agent, prompt, isolate, model, index, role }) {
   const promptArgs = prompt ? ['--prompt', prompt] : [];
+  const surface = launchSurface(agent);
   const repoSelector = worktree.repoId ? `id:${worktree.repoId}` : `path:${worktree.path}`;
   const createArgs = [
     'worktree',
@@ -1280,7 +1613,7 @@ async function launchOne({ worktree, agent, prompt, isolate, model, index, role 
         `path:${createdPath}`,
         ...promptArgs,
         '--surface',
-        'terminal',
+        surface,
         '--model',
         model,
         '--json',
@@ -1295,13 +1628,16 @@ async function launchOne({ worktree, agent, prompt, isolate, model, index, role 
       path: createdPath,
       isolate,
       handle: launchHandle(launchResult),
+      sessionId: launchSessionId(launchResult),
+      kind: launchKind(launchResult),
+      surface,
       worktreeId: launchWorktreeId(createResult) || launchWorktreeId(launchResult),
       result: { create: createResult, launch: launchResult },
     };
   }
 
   const args = isolate
-    ? [...createArgs, '--agent', agent, ...promptArgs, '--surface', 'terminal']
+    ? [...createArgs, '--agent', agent, ...promptArgs, '--surface', surface]
     : [
         'agent',
         'launch',
@@ -1311,7 +1647,7 @@ async function launchOne({ worktree, agent, prompt, isolate, model, index, role 
         `path:${worktree.path}`,
         ...promptArgs,
         '--surface',
-        'terminal',
+        surface,
       ];
   if (model) args.push('--model', model);
   args.push('--json');
@@ -1325,6 +1661,9 @@ async function launchOne({ worktree, agent, prompt, isolate, model, index, role 
     path: worktree.path,
     isolate,
     handle: launchHandle(result),
+    sessionId: launchSessionId(result),
+    kind: launchKind(result),
+    surface,
     worktreeId: launchWorktreeId(result) || (isolate ? null : worktree.id),
     result,
   };
@@ -1353,14 +1692,13 @@ async function launchAgents(body) {
     throw new Error('선택한 워크트리를 Orca에서 찾지 못했습니다. 새로고침 후 다시 시도해 주세요.');
   }
 
-  const workerPrompt = blank
-    ? ''
-    : team
-      ? `${COMMON_RULES}\n\n[워커 역할]\n지휘자 1명이 너희 ${count}명의 워커를 운영합니다. 지금은 파일을 수정하지 말고 지휘자의 첫 지시를 기다리세요. 지시가 오면 맡은 범위만 수행하고, 완료·막힘·추가 판단이 필요하면 Orca orchestration 메시지로 지휘자에게 알리세요.\n\n[전체 작업 맥락]\n${prompt}`
-      : agentPrompt(prompt);
-
+  // In team mode the app opens only one coordinator session. The worker
+  // headcount is passed in the coordinator prompt; the coordinator opens and
+  // manages any worker sessions it actually needs.
+  const workerPrompt = blank ? '' : agentPrompt(prompt);
+  const workerLaunches = team ? 0 : count;
   const launches = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < workerLaunches; index += 1) {
     try {
       launches.push(
         await launchOne({
@@ -1392,34 +1730,28 @@ async function launchAgents(body) {
 
   let coordinator = null;
   if (team) {
-    const workers = launches.filter((launch) => launch.ok && launch.handle);
-    const workerLines = workers.length
-      ? workers
-          .map(
-            (worker) =>
-              `- 워커 ${worker.index + 1}: ${worker.path} · terminal ${worker.handle}`,
-          )
-          .join('\n')
-      : '- 아직 살아 있는 워커 터미널이 없습니다.';
-    const coordinatorPrompt = `${COMMON_RULES}\n\n[지휘자 역할]\n너는 이 팀의 지휘자다. 직접 파일을 수정하지 말고, 아래 워커들에게 일을 나눠 지시하고 결과를 취합해.\n워커 목록:\n${workerLines}\n\n지시는 \`orca orchestration send --subject \"...\" --body \"...\" --to <terminal> --type status --json\`로 보내고, 워커 응답은 \`orca orchestration inbox --limit 40 --json\`으로 확인해. 먼저 각 워커에게 맡을 범위를 하나씩 정해 지시한 뒤, 결과를 모아 최종 보고를 만들어.\n\n[전체 작업]\n${prompt}`;
+    const workerSurface = launchSurface(agent);
+    const workerTarget =
+      workerSurface === 'chat' ? 'orca_session_id:<세션 ID>' : '<terminal handle>';
+    const coordinatorPrompt = `[코디네이터 역할]\n${COMMON_RULES}\n\n너는 이 팀의 코디네이터다. 앱은 워커 세션을 미리 열지 않았다. 워커 정원은 ${count}명이다. 작업을 ${count}명이 나눠 맡을 수 있는 범위로 설계하고, 각 범위의 담당·완료 조건·검증 방법을 정한 뒤 실행과 취합을 지휘해.\n워커 세션이 필요하면 현재 워크트리에서 \`orca agent launch --agent ${agent} --worktree path:$(pwd) --prompt \"...\" --surface ${workerSurface} --json\`로 직접 띄워. ${workerSurface === 'chat' ? '채팅 세션이면 `orca agent list --worktree path:$(pwd) --json`에서 그 세션의 orcaSessionId를 확인해 `orca_session_id:<id>` 형식으로' : '터미널 세션이면 반환된 terminal handle을'} \`orca orchestration send --to ${workerTarget} --subject \"...\" --body \"...\" --type status --json\`의 대상으로 넣어 지휘해. 워커를 띄울 때는 프롬프트 첫 줄에 반드시 [워커 역할] 표식을 넣어. 직접 파일을 수정하기보다 분배·검증·취합에 집중해.\n\n[전체 작업]\n${prompt}`;
     try {
       coordinator = await launchOne({
         worktree,
         agent,
         prompt: coordinatorPrompt,
-        isolate: false,
+        isolate,
         model: coordinatorModel,
-        index: count,
+        index: 0,
         role: 'coordinator',
       });
     } catch (error) {
       coordinator = {
         ok: false,
-        index: count,
+        index: 0,
         role: 'coordinator',
         agent,
         path: worktree.path,
-        isolate: false,
+        isolate,
         error: errorMessage(error),
       };
     }
@@ -1647,6 +1979,27 @@ async function route(req, res) {
     return;
   }
 
+  if (method === 'GET' && path === '/freebuff/session') {
+    try {
+      json(
+        res,
+        200,
+        await readFreebuffSession(
+          url.searchParams.get('path') || '',
+          url.searchParams.get('chat') || '',
+        ),
+      );
+    } catch (error) {
+      json(res, 200, {
+        ok: false,
+        entries: [],
+        error: errorMessage(error),
+        fetchedAt: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
   if (method === 'GET' && path === '/transcript') {
     try {
       json(res, 200, await readTranscript(url.searchParams.get('sessionId')));
@@ -1666,6 +2019,15 @@ async function route(req, res) {
     return;
   }
 
+  if (method === 'POST' && path === '/terminal/key') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      json(res, 200, await sendTerminalKey(body));
+    } catch (error) {
+      json(res, 400, { ok: false, error: errorMessage(error) });
+    }
+    return;
+  }
   if (method === 'POST' && path === '/terminal/send') {
     try {
       const body = JSON.parse((await readBody(req)) || '{}');
@@ -1730,6 +2092,16 @@ async function route(req, res) {
     try {
       const body = JSON.parse((await readBody(req)) || '{}');
       json(res, 200, await createWorktreeTerminal(body));
+    } catch (error) {
+      json(res, 400, { ok: false, error: errorMessage(error) });
+    }
+    return;
+  }
+
+  if (method === 'POST' && path === '/freebuff/continue') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      json(res, 200, await continueFreebuff(body));
     } catch (error) {
       json(res, 400, { ok: false, error: errorMessage(error) });
     }

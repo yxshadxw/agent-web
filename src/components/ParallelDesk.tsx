@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -6,6 +6,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowLeft,
+  ArrowRightLeft,
   ArrowUp,
   BookOpen,
   Bot,
@@ -16,6 +17,7 @@ import {
   CircleDot,
   Clipboard,
   Clock3,
+  Copy,
   ExternalLink,
   FileText,
   FolderPlus,
@@ -31,6 +33,7 @@ import {
   Plus,
   Power,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Send,
@@ -39,12 +42,15 @@ import {
   Sparkles,
   SquareTerminal,
   Terminal,
+  Upload,
+  Wrench,
   X,
   Zap,
 } from 'lucide-react';
 import { useAgyQuota } from '../hooks/useQuota';
 import {
   orcaApi,
+  type FreebuffSessionPayload,
   type FreebuffUsage,
   type GithubInfo,
   type GithubWorkflow,
@@ -57,6 +63,7 @@ import {
   type OrcaProject,
   type OrcaWorktree,
   type TerminalSnapshot,
+  type TranscriptEntry,
   type TranscriptPayload,
 } from '../lib/orca';
 import { relativeTime, shortPath } from '../data';
@@ -65,6 +72,30 @@ import { SelectMenu } from './SelectMenu';
 
 type DeskTab = 'agents' | 'github' | 'instructions' | 'memory' | 'messages';
 type RunMode = 'single' | 'parallel';
+const DESK_STATE_KEY = 'agent-web:parallel-desk-view:v1';
+
+function readDeskState(): { path: string | null; tab: DeskTab; handle: string | null } {
+  try {
+    // The desk has to survive a full app/browser restart, not just an F5.
+    // Read the previous session-only value as a one-time migration.
+    const stored =
+      localStorage.getItem(DESK_STATE_KEY) ||
+      sessionStorage.getItem(DESK_STATE_KEY) ||
+      '{}';
+    const parsed = JSON.parse(stored) as {
+      path?: unknown;
+      tab?: unknown;
+      handle?: unknown;
+    };
+    return {
+      path: typeof parsed.path === 'string' ? parsed.path : null,
+      tab: TABS.some((item) => item.id === parsed.tab) ? (parsed.tab as DeskTab) : 'agents',
+      handle: typeof parsed.handle === 'string' ? parsed.handle : null,
+    };
+  } catch {
+    return { path: null, tab: 'agents', handle: null };
+  }
+}
 
 const AGENT_OPTIONS = [
   { id: 'freebuff', label: 'Freebuff', short: 'FB', cls: 'freebuff' },
@@ -149,6 +180,20 @@ function agentMeta(id: string) {
   };
 }
 
+const AGENT_LOGO: Record<string, string> = {
+  freebuff: '/freebuff.svg',
+  opencode: '/opencode.svg',
+  gemini: '/gemini.png',
+  codex: '/codex.svg',
+  claude: '/claude.svg',
+};
+
+function AgentMark({ id, short }: { id: string; short: string }) {
+  const logo = AGENT_LOGO[id];
+  if (logo) return <img src={logo} alt="" className="agent-logo" />;
+  return <>{short}</>;
+}
+
 function stateLabel(state: string) {
   if (state === 'working') return '작업 중';
   if (state === 'waiting') return '응답 대기';
@@ -189,9 +234,10 @@ function useNotice() {
 }
 
 export function ParallelDesk({ onClose }: { onClose: () => void }) {
+  const initialDeskState = useRef(readDeskState());
   const [overview, setOverview] = useState<OrcaOverview | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [tab, setTab] = useState<DeskTab>('agents');
+  const [selectedPath, setSelectedPath] = useState<string | null>(initialDeskState.current.path);
+  const [tab, setTab] = useState<DeskTab>(initialDeskState.current.tab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -203,6 +249,8 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const { notice, notify } = useNotice();
   const loadingRef = useRef(false);
+  const restoreLogRef = useRef(initialDeskState.current.handle);
+  const deskReadyRef = useRef(false);
 
   const load = useCallback(
     async (force = false, quiet = false) => {
@@ -211,6 +259,15 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
       if (!quiet) setLoading(true);
       try {
         const next = await orcaApi.overview(force);
+        const restoredHandle = restoreLogRef.current;
+        if (restoredHandle) {
+          restoreLogRef.current = null;
+          const restored = next.agents.find(
+            (agent) => agent.terminalHandle === restoredHandle || agent.id === restoredHandle,
+          );
+          if (restored) setLogAgent(restored);
+        }
+        deskReadyRef.current = true;
         setOverview(next);
         setError(null);
         setSelectedPath((current) => {
@@ -240,6 +297,23 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
     }, 3500);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (!deskReadyRef.current) return;
+    try {
+      localStorage.setItem(
+        DESK_STATE_KEY,
+        JSON.stringify({
+          path: selectedPath,
+          tab,
+          handle: logAgent?.terminalHandle || null,
+        }),
+      );
+      sessionStorage.removeItem(DESK_STATE_KEY);
+    } catch {
+      // Private browsing can reject storage; the desk still works.
+    }
+  }, [logAgent, selectedPath, tab]);
 
   const selectedWorktree = useMemo(
     () => overview?.worktrees.find((worktree) => worktree.path === selectedPath) || null,
@@ -474,49 +548,92 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                       (agent) => agent.state === 'working',
                     ).length;
                     return (
-                      <div
-                        key={worktree.path}
-                        className={`desk-worktree ${
-                          selectedPath === worktree.path ? 'active' : ''
-                        }`}
-                      >
-                        <button
-                          className="desk-worktree-open"
-                          onClick={() => {
-                            setSelectedPath(worktree.path);
-                            setSideOpen(false);
-                          }}
+                      <div className="desk-worktree-group" key={worktree.path}>
+                        <div
+                          className={`desk-worktree ${
+                            selectedPath === worktree.path ? 'active' : ''
+                          }`}
                         >
-                          <span className={`desk-status-dot ${worktree.status}`} />
-                          <span className="desk-worktree-main">
-                            <span className="desk-worktree-name">
-                              {worktree.displayName}
-                              {worktree.isMainWorktree &&
-                                worktree.displayName.toLowerCase() !== 'main' && <em>main</em>}
+                          <button
+                            className="desk-worktree-open"
+                            onClick={() => {
+                              setSelectedPath(worktree.path);
+                              setSideOpen(false);
+                            }}
+                          >
+                            <span className={`desk-status-dot ${worktree.status}`} />
+                            <span className="desk-worktree-main">
+                              <span className="desk-worktree-name">
+                                {worktree.displayName}
+                                {worktree.isMainWorktree &&
+                                  worktree.displayName.toLowerCase() !== 'main' && <em>main</em>}
+                              </span>
+                              <span className="desk-worktree-meta">
+                                {worktree.branch || shortPath(worktree.path)}
+                              </span>
                             </span>
-                            <span className="desk-worktree-meta">
-                              {worktree.branch || shortPath(worktree.path)}
-                            </span>
-                          </span>
-                          {working > 0 ? (
-                            <span className="desk-worktree-live">{working}</span>
-                          ) : (
-                            <span className="desk-worktree-agents">{worktree.agents.length}</span>
-                          )}
-                        </button>
-                        <button
-                          className="desk-worktree-del"
-                          onClick={() => void removeWorktree(worktree)}
-                          disabled={removingId === worktree.id}
-                          title="워크트리 삭제"
-                          aria-label={`${worktree.displayName} 워크트리 삭제`}
-                        >
-                          {removingId === worktree.id ? (
-                            <Loader2 size={11} className="spin" />
-                          ) : (
-                            <Trash2 size={11} />
-                          )}
-                        </button>
+                            {working > 0 ? (
+                              <span className="desk-worktree-live">{working}</span>
+                            ) : (
+                              <span className="desk-worktree-agents">{worktree.agents.length}</span>
+                            )}
+                          </button>
+                          <button
+                            className="desk-worktree-del"
+                            onClick={() => void removeWorktree(worktree)}
+                            disabled={removingId === worktree.id}
+                            title="워크트리 삭제"
+                            aria-label={`${worktree.displayName} 워크트리 삭제`}
+                          >
+                            {removingId === worktree.id ? (
+                              <Loader2 size={11} className="spin" />
+                            ) : (
+                              <Trash2 size={11} />
+                            )}
+                          </button>
+                        </div>
+                        {worktree.agents.length > 0 && (
+                          <div
+                            className="desk-side-agents"
+                            aria-label={`${worktree.displayName} 에이전트`}
+                          >
+                            {worktree.agents.map((agent) => {
+                              const meta = agentMeta(agent.agent);
+                              return (
+                                <button
+                                  type="button"
+                                  className={`desk-side-agent ${agent.state}`}
+                                  key={agent.id}
+                                  onClick={() => {
+                                    setSelectedPath(worktree.path);
+                                    openLog(agent);
+                                    setSideOpen(false);
+                                  }}
+                                  title={agent.title}
+                                >
+                                  <span
+                                    className={`desk-agent-badge desk-side-agent-badge ${meta.cls}`}
+                                  >
+                                    <AgentMark id={meta.id} short={meta.short} />
+                                  </span>
+                                  <span className="desk-side-agent-main">
+                                    <strong>{meta.label}</strong>
+                                    <small>{agent.title}</small>
+                                  </span>
+                                  {agent.role ? (
+                                    <span className={`desk-role ${agent.role}`}>
+                                      {roleLabel(agent.role)}
+                                    </span>
+                                  ) : (
+                                    <span className={`desk-state ${agent.state}`}>
+                                      {stateLabel(agent.state)}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -695,9 +812,13 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
 
       {logAgent && (
         <LogDrawer
+          key={logAgent.terminalHandle || logAgent.id}
           agent={logAgent}
+          overview={overview}
+          notify={notify}
           onClose={() => setLogAgent(null)}
           onOverview={setOverview}
+          onContinue={setLogAgent}
         />
       )}
       {creditsOpen && (
@@ -797,7 +918,7 @@ function AgentsTab({
         count: blank ? 1 : isSingle ? 1 : count,
         isolate,
         team: blank ? false : !isSingle,
-        workerModel: workerModel.trim(),
+        workerModel: isSingle ? workerModel.trim() : '',
         coordinatorModel: isSingle ? '' : coordinatorModel.trim(),
       });
       if (result.overview) onOverview(result.overview);
@@ -806,7 +927,6 @@ function AgentsTab({
         ...(result.coordinator ? [result.coordinator] : []),
       ];
       const success = launched.filter((launchResult) => launchResult.ok);
-      const workerSuccess = result.launches.filter((launchResult) => launchResult.ok).length;
       if (success.length) {
         if (!blank) setPrompt('');
         notify(
@@ -816,35 +936,54 @@ function AgentsTab({
               ? `${agentMeta(agentType).label} 1명을 ${
                   isolate ? '새 워크트리에서 ' : ''
                 }시작했어요`
-              : `지휘자 1명 + 워커 ${workerSuccess}명을 ${
-                  isolate ? '분리된 워크트리에서 ' : ''
-                }시작했어요`,
+              : `코디네이터 1명을 ${
+                  isolate ? '새 워크트리에서 ' : ''
+                }시작했어요 · 워커 ${count}명 지시`,
         );
         // "세션만 열기" should land in the session that was just created,
         // not leave the user on the launch form.
         if (blank) {
           const launched = success[0];
-          const nextAgent = (result.overview?.agents || overview?.agents || []).find(
-            (item) => launched.handle && item.terminalHandle === launched.handle,
-          );
+          const launchedChat = launched.surface === 'chat' || launched.kind === 'chat';
+          const overviewAgents = result.overview?.agents || overview?.agents || [];
+          const nextAgent =
+            overviewAgents.find(
+              (item) =>
+                (launched.sessionId && item.orcaSessionId === launched.sessionId) ||
+                (launched.handle && item.terminalHandle === launched.handle),
+            ) ||
+            (launchedChat
+              ? overviewAgents
+                  .filter(
+                    (item) =>
+                      item.kind === 'chat' &&
+                      item.agent === (launched.agent || agentType) &&
+                      item.path === (launched.path || worktree.path),
+                  )
+                  .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))[0]
+              : undefined);
           if (nextAgent) {
             onLog(nextAgent);
-          } else if (launched.handle) {
+          } else if (launched.sessionId || (!launchedChat && launched.handle)) {
+            const sessionId = launched.sessionId || null;
+            const handle = launchedChat ? null : launched.handle || null;
+            const label = agentMeta(agentType).label;
             onLog({
-              id: `launch:${launched.handle}`,
-              orcaSessionId: null,
+              id: `launch:${sessionId || handle}`,
+              orcaSessionId: sessionId,
               agent: launched.agent || agentType,
+              kind: launchedChat ? 'chat' : 'terminal',
               state: 'working',
-              title: `${agentMeta(agentType).label} 세션`,
+              title: launchedChat ? `${label} 채팅` : `${label} 세션`,
               prompt: '',
               worktreeId: launched.worktreeId || worktree.id,
               repo: worktree.repo,
               path: launched.path || worktree.path,
               branch: worktree.branch,
-              terminalHandle: launched.handle,
-              terminalTitle: `${agentMeta(agentType).label} 세션`,
+              terminalHandle: handle,
+              terminalTitle: launchedChat ? null : `${label} 세션`,
               terminalPreview: '',
-              terminalConnected: true,
+              terminalConnected: Boolean(handle),
               updatedAt: Date.now(),
               interrupted: false,
             });
@@ -878,16 +1017,17 @@ function AgentsTab({
             <h2>{isSingle ? '단일 에이전트로 시작' : '작업 한 줄로 팀 시작'}</h2>
             <p>
               {isSingle
-                ? `지휘자 없이 ${agentMeta(agentType).label} 1명이 맡은 작업을 끝까지 진행합니다.`
-                : '지휘자 1명이 워커에게 작업을 나눠 진행합니다.'}{' '}
+                ? `코디네이터 없이 ${agentMeta(agentType).label} 1명이 맡은 작업을 끝까지 진행합니다.`
+                : `코디네이터 1명이 워커 ${count}명에게 일을 나눠 진행합니다.`}{' '}
               {isolate
                 ? '새 워크트리에서 실행해 파일 충돌을 줄입니다.'
                 : '같은 워크트리에서 실행합니다. 파일 충돌에 주의하세요.'}
+              {agentType === 'antigravity' && ' Agy 세션은 CLI 대신 채팅으로 열립니다.'}
             </p>
           </div>
           <span className="desk-launch-count">
-            <b>{isSingle ? 1 : count + 1}</b>
-            <span>{isSingle ? '1 agent' : `1 lead · ${count} workers`}</span>
+            <b>1</b>
+            <span>{isSingle ? '에이전트' : `코디네이터 · 워커 ${count}명`}</span>
           </span>
         </div>
 
@@ -902,7 +1042,7 @@ function AgentsTab({
             <span className="desk-run-mode-ico"><Bot size={14} /></span>
             <span>
               <b>단일</b>
-              <small>지휘자 없이 1명</small>
+              <small>코디네이터 없이 1명</small>
             </span>
           </button>
           <button
@@ -915,7 +1055,7 @@ function AgentsTab({
             <span className="desk-run-mode-ico"><Boxes size={14} /></span>
             <span>
               <b>병렬</b>
-              <small>지휘자 + 워커</small>
+              <small>코디네이터가 관리</small>
             </span>
           </button>
         </div>
@@ -937,12 +1077,12 @@ function AgentsTab({
         <div className="desk-launch-controls simple">
           <div className="desk-launch-summary">
             <span className={`desk-agent-badge ${agentMeta(agentType).cls}`}>
-              {agentMeta(agentType).short}
+              <AgentMark id={agentType} short={agentMeta(agentType).short} />
             </span>
             <span className="desk-launch-summary-main">
               <b>{agentMeta(agentType).label}</b>
               <small>
-                {isSingle ? '지휘자 없이 단독 실행' : `지휘자 1 + 워커 ${count}`}
+                {isSingle ? '코디네이터 없이 단독 실행' : `코디네이터 1 · 워커 ${count}명 지시`}
                 {isolate ? ' · 새 워크트리' : ' · 현재 워크트리'}
               </small>
             </span>
@@ -966,7 +1106,7 @@ function AgentsTab({
                     className={`desk-agent-tab ${agentType === option.id ? 'active' : ''} ${option.cls}`}
                     onClick={() => setAgentType(option.id)}
                   >
-                    <span>{option.short}</span>
+                    <span><AgentMark id={option.id} short={option.short} /></span>
                     {option.label}
                   </button>
                 ))}
@@ -1011,31 +1151,16 @@ function AgentsTab({
 
               {modelOptions(agentType).length > 0 ? (
                 <div className="desk-model-row">
-                  {!isSingle && (
-                    <div className="desk-model-field">
-                      <span>지휘자 모델</span>
-                      <button
-                        type="button"
-                        className="desk-model-trigger"
-                        onClick={() => setModelTarget('coordinator')}
-                        aria-haspopup="dialog"
-                        aria-label={`지휘자 모델 선택: ${modelName(agentType, coordinatorModel)}`}
-                      >
-                        <span>{modelName(agentType, coordinatorModel)}</span>
-                        <ChevronDown size={12} />
-                      </button>
-                    </div>
-                  )}
                   <div className="desk-model-field">
-                    <span>{isSingle ? '모델' : '워커 모델'}</span>
+                    <span>{isSingle ? '모델' : '코디네이터 모델'}</span>
                     <button
                       type="button"
                       className="desk-model-trigger"
-                      onClick={() => setModelTarget('worker')}
+                      onClick={() => setModelTarget(isSingle ? 'worker' : 'coordinator')}
                       aria-haspopup="dialog"
-                      aria-label={`${isSingle ? '모델' : '워커 모델'} 선택: ${modelName(agentType, workerModel)}`}
+                      aria-label={`${isSingle ? '모델' : '코디네이터 모델'} 선택: ${modelName(agentType, isSingle ? workerModel : coordinatorModel)}`}
                     >
-                      <span>{modelName(agentType, workerModel)}</span>
+                      <span>{modelName(agentType, isSingle ? workerModel : coordinatorModel)}</span>
                       <ChevronDown size={12} />
                     </button>
                   </div>
@@ -1067,10 +1192,10 @@ function AgentsTab({
             {launching
               ? isSingle
                 ? '시작 중…'
-                : '팀 구성 중…'
+                : '코디네이터 시작 중…'
               : isSingle
                 ? '에이전트 1명 시작'
-                : `지휘자 + ${count} 워커 시작`}
+                : '코디네이터 1명 시작'}
           </button>
           <button
             type="button"
@@ -1099,17 +1224,13 @@ function AgentsTab({
         open={modelTarget !== null}
         onClose={() => setModelTarget(null)}
         label={
-          modelTarget === 'coordinator'
-            ? '지휘자 모델 선택'
-            : isSingle
-              ? '모델 선택'
-              : '워커 모델 선택'
+          modelTarget === 'coordinator' ? '코디네이터 모델 선택' : '모델 선택'
         }
       >
         <div className="sheet-content model-sheet desk-model-sheet">
           <div className="sheet-head">
             <span className="sheet-title">
-              {modelTarget === 'coordinator' ? '지휘자 모델' : isSingle ? '모델' : '워커 모델'}
+              {modelTarget === 'coordinator' ? '코디네이터 모델' : '모델'}
             </span>
             <span className="sheet-sub">{agentMeta(agentType).label}</span>
           </div>
@@ -1191,11 +1312,14 @@ function AgentsTab({
               .map((agent) => (
                 <button className="desk-mini-agent" key={agent.id} onClick={() => onLog(agent)}>
                   <span className={`desk-agent-badge ${agentMeta(agent.agent).cls}`}>
-                    {agentMeta(agent.agent).short}
+                    <AgentMark id={agent.agent} short={agentMeta(agent.agent).short} />
                   </span>
                   <span>
                     <b>{agentMeta(agent.agent).label}</b>
-                    <small>{agent.repo} / {shortPath(agent.path)}</small>
+                    <small>
+                      {roleLabel(agent.role) ? `${roleLabel(agent.role)} · ` : ''}
+                      {agent.repo} / {shortPath(agent.path)}
+                    </small>
                   </span>
                   <span className={`desk-state ${agent.state}`}>{stateLabel(agent.state)}</span>
                 </button>
@@ -1207,16 +1331,33 @@ function AgentsTab({
   );
 }
 
+function roleLabel(role: OrcaAgent['role']) {
+  if (role === 'coordinator') return '코디네이터';
+  if (role === 'worker') return '워커';
+  return '';
+}
+
 function AgentCard({ agent, onClick }: { agent: OrcaAgent; onClick: () => void }) {
   const meta = agentMeta(agent.agent);
   return (
     <button className={`desk-agent-card ${agent.state}`} onClick={onClick}>
       <div className="desk-agent-card-head">
-        <span className={`desk-agent-badge ${meta.cls}`}>{meta.short}</span>
+        <span className={`desk-agent-badge ${meta.cls}`}>
+          <AgentMark id={meta.id} short={meta.short} />
+        </span>
         <span className="desk-agent-card-title">
           <b>{meta.label}</b>
-          <small>{agent.terminalConnected ? '터미널 연결됨' : '터미널 없음'}</small>
+          <small>
+            {agent.kind === 'chat'
+              ? 'Orca 채팅'
+              : agent.terminalConnected
+                ? '터미널 연결됨'
+                : '터미널 없음'}
+          </small>
         </span>
+        {agent.role && (
+          <span className={`desk-role ${agent.role}`}>{roleLabel(agent.role)}</span>
+        )}
         <span className={`desk-state ${agent.state}`}>{stateLabel(agent.state)}</span>
       </div>
       <strong className="desk-agent-name">{agent.title}</strong>
@@ -1229,8 +1370,8 @@ function AgentCard({ agent, onClick }: { agent: OrcaAgent; onClick: () => void }
           {agent.updatedAt ? relativeTime(agent.updatedAt) : '방금'}
         </span>
         <span>
-          <SquareTerminal size={12} />
-          로그
+          {agent.kind === 'chat' ? <MessageSquare size={12} /> : <SquareTerminal size={12} />}
+          {agent.kind === 'chat' ? '채팅' : '로그'}
         </span>
       </div>
     </button>
@@ -1280,16 +1421,20 @@ function GithubTab({ path, notify }: { path: string; notify: (message: string) =
     }
   };
 
-  const commitChanges = async (push: boolean) => {
-    if (!commitMessage.trim() || commitBusy) return;
+  const commitChanges = async (push: boolean, pushOnly = false) => {
+    if ((!pushOnly && !commitMessage.trim()) || commitBusy) return;
     setCommitBusy(push ? 'push' : 'commit');
     setCommitError(null);
     try {
-      const result = await orcaApi.commitAndPush(path, commitMessage.trim(), push);
+      const result = await orcaApi.commitAndPush(
+        path,
+        pushOnly ? '' : commitMessage.trim(),
+        push,
+        pushOnly,
+      );
       if (result.ok) {
-        notify(
-          `커밋 ${result.commit?.hash || ''}${result.pushed ? ' · 푸시 완료' : ''}`.trim(),
-        );
+        const label = result.committed ? `커밋 ${result.commit?.hash || ''}` : '푸시';
+        notify(`${label}${result.pushed ? ' · 푸시 완료' : ''}`.trim());
         setCommitMessage('');
         await load();
       } else {
@@ -1391,9 +1536,19 @@ function GithubTab({ path, notify }: { path: string; notify: (message: string) =
             {commitBusy === 'push' ? <Loader2 size={13} className="spin" /> : <GitBranch size={13} />}
             커밋 + 푸시
           </button>
+          <button
+            className="desk-btn ghost small"
+            onClick={() => void commitChanges(true, true)}
+            disabled={commitBusy !== null}
+            title="커밋하지 않고 로컬 커밋을 원격에 푸시"
+          >
+            {commitBusy === 'push' ? <Loader2 size={13} className="spin" /> : <GitBranch size={13} />}
+            푸시만
+          </button>
         </div>
         <p className="desk-commit-hint">
-          푸시가 충돌하면 지휘자 세션에 충돌 해결 메시지를 보냅니다. 강제 푸시는 하지 않습니다.
+          변경 사항이 없어도 앞선 커밋은 푸시만으로 올릴 수 있어요. 푸시가 충돌하면
+          코디네이터 세션에 충돌 해결 메시지를 보냅니다. 강제 푸시는 하지 않습니다.
         </p>
         {commitError && (
           <div className="desk-banner">
@@ -1762,7 +1917,7 @@ function MessagesTab({
                 placeholder={recipients.length ? '작업자 선택' : '연결된 작업자가 없습니다'}
                 options={recipients.map((agent) => ({
                   value: agent.id,
-                  label: `${agentMeta(agent.agent).label} · ${agent.title.slice(0, 42)}`,
+                  label: `${roleLabel(agent.role) ? `[${roleLabel(agent.role)}] ` : ''}${agentMeta(agent.agent).label} · ${agent.title.slice(0, 42)}`,
                   description: `${shortPath(agent.path)} · ${stateLabel(agent.state)}`,
                   meta: relativeTime(agent.updatedAt ?? undefined),
                 }))}
@@ -1827,7 +1982,7 @@ function MessagesTab({
           <DeskEmpty
             icon={<MessageSquare size={25} />}
             title="아직 받은 메시지가 없어요"
-            text="지휘자와 워커가 Orca orchestration으로 메시지를 주고받으면 여기에 표시됩니다."
+            text="코디네이터와 워커가 Orca orchestration으로 메시지를 주고받으면 여기에 표시됩니다."
           />
         ) : (
           <div className="desk-message-list">
@@ -1878,7 +2033,7 @@ function MessagesTab({
               title={`${agent.repo} / ${agent.path}`}
             >
               <span className={`desk-agent-badge ${agentMeta(agent.agent).cls}`}>
-                {agentMeta(agent.agent).short}
+                <AgentMark id={agent.agent} short={agentMeta(agent.agent).short} />
               </span>
               <span>
                 <b>{agentMeta(agent.agent).label}</b>
@@ -1902,7 +2057,13 @@ function DeskLoading({ text }: { text: string }) {
   );
 }
 
-function TranscriptMarkdown({ text }: { text: string }) {
+function TranscriptMarkdown({
+  text,
+  className = 'desk-transcript-md',
+}: {
+  text: string;
+  className?: string;
+}) {
   const html = useMemo(
     () =>
       DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }) as string, {
@@ -1911,7 +2072,7 @@ function TranscriptMarkdown({ text }: { text: string }) {
       }),
     [text],
   );
-  return <div className="md desk-transcript-md" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 type FreebuffModel = {
@@ -1942,6 +2103,144 @@ const FREEBUFF_MODELS: FreebuffModel[] = [
   },
 ];
 
+
+type FreebuffPickerModel = {
+  id: string;
+  label: string;
+  description: string;
+  multiplier: string | null;
+};
+
+const FREEBUFF_PICKER_MODELS: FreebuffPickerModel[] = [
+  { id: 'deepseek-v4.1-flash-fast', label: 'DeepSeek V4.1 Flash Fast', description: '가장 빠름 · max', multiplier: '3x' },
+  { id: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', description: '안정적 속도 · high', multiplier: '2x' },
+  { id: 'muse-spark-1.3', label: 'Muse Spark 1.3', description: '혼잡 시 대체 · high', multiplier: '3x' },
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna', description: '강력한 범용 · high', multiplier: '4x' },
+  { id: 'muse-ember', label: 'Muse Ember', description: 'Meta · 빠름 · medium', multiplier: '6x' },
+  { id: 'claude-haiku-5.5', label: 'Claude Haiku 5.5', description: 'Anthropic · 100k · medium', multiplier: '6x' },
+  { id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', description: 'OpenAI · 하루 2회 · medium', multiplier: '30x' },
+  { id: 'deepseek-v4.1-flash-slow', label: 'DeepSeek V4.1 Flash Slow', description: '가장 저렴 · low', multiplier: '1x' },
+  { id: 'beam-1.0', label: 'Beam 1.0', description: 'Reflection · coding · high', multiplier: null },
+  { id: 'nemotron-3.5-lightning', label: 'Nemotron 3.5 Lightning', description: '빠름 · high', multiplier: null },
+];
+
+type FreebuffSentMessage = {
+  id: string;
+  text: string;
+  at: number;
+  afterBlock?: number;
+};
+
+type DeskFlowItem =
+  | { kind: 'block'; block: TerminalBlock; key: string }
+  | { kind: 'message'; message: FreebuffSentMessage; key: string };
+
+const FREEBUFF_SENT_LIMIT = 60;
+
+const FREEBUFF_TOOL_LABELS: Record<string, string> = {
+  run_terminal_command: 'bash',
+  read_files: 'read',
+  write_file: 'write',
+  str_replace: 'edit',
+  code_search: 'search',
+  list_directory: 'ls',
+  glob: 'glob',
+  write_todos: 'todo',
+  web_search: 'web',
+  read_url: 'fetch',
+  skill: 'skill',
+  ask_user: 'ask',
+  suggest_followups: 'suggest',
+  render_ui: 'ui',
+};
+
+function freebuffToolLabel(name: string) {
+  return FREEBUFF_TOOL_LABELS[name] || name;
+}
+
+function freebuffCommandHead(command: string) {
+  const lines = command
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  // Tool scripts commonly start with `set +e` or a `cd`, which tells the
+  // reader nothing. Use the first real step as the collapsed summary.
+  return (
+    lines.find(
+      (line) => !/^(?:set\s+[+-][a-z]*|set\s+[+-]o\s+\w+|cd\s+\S+|#!.*)$/i.test(line),
+    ) ||
+    lines[0] ||
+    ''
+  );
+}
+
+function freebuffToolHead(entry: { name: string; command: string }) {
+  if (entry.command.trim().startsWith('{')) {
+    try {
+      const input = JSON.parse(entry.command) as Record<string, unknown>;
+      const pick = (value: unknown) =>
+        typeof value === 'string' && value.trim() ? value.trim() : '';
+      const paths = Array.isArray(input.paths)
+        ? input.paths.filter((value): value is string => typeof value === 'string')
+        : [];
+      return (
+        pick(input.name) ||
+        pick(input.pattern) ||
+        pick(input.path) ||
+        pick(input.file_path) ||
+        pick(input.query) ||
+        pick(input.url) ||
+        pick(input.text) ||
+        (paths.length ? paths.join(', ') : '') ||
+        (Array.isArray(input.todos) ? `할 일 ${input.todos.length}개` : '') ||
+        (Array.isArray(input.followups) ? `추천 ${input.followups.length}개` : '') ||
+        ''
+      );
+    } catch {
+      // Fall through to the line-based summary for non-JSON tool input.
+    }
+  }
+  return freebuffCommandHead(entry.command);
+}
+
+function freebuffSentKey(path: string): string {
+  return `agent-web:freebuff-sent:v1:${path}`;
+}
+
+function readFreebuffSent(path: string): FreebuffSentMessage[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(freebuffSentKey(path)) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is FreebuffSentMessage =>
+          Boolean(
+            item &&
+              typeof item.id === 'string' &&
+              typeof item.text === 'string' &&
+              typeof item.at === 'number',
+          ),
+      )
+      .map((item) => ({
+        ...item,
+        afterBlock:
+          typeof item.afterBlock === 'number' && item.afterBlock >= 0
+            ? item.afterBlock
+            : undefined,
+      }))
+      .slice(-FREEBUFF_SENT_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function writeFreebuffSent(path: string, messages: FreebuffSentMessage[]) {
+  try {
+    window.localStorage.setItem(freebuffSentKey(path), JSON.stringify(messages.slice(-FREEBUFF_SENT_LIMIT)));
+  } catch {
+    // Storage can be unavailable in private or embedded browsers.
+  }
+}
 function remainingUntilLabel(value?: string | null): string | null {
   if (!value) return null;
   const until = new Date(value).getTime();
@@ -1963,6 +2262,7 @@ function cleanFreebuffTail(lines: string[]): string[] {
     let line = raw
       .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
       .replace(/\r$/, '')
+      .replace(/\s*[⎘▄▟▙■□]\s*$/g, '')
       .trimEnd();
     if (!line.trim()) {
       if (cleaned[cleaned.length - 1] !== '') cleaned.push('');
@@ -1976,10 +2276,17 @@ function cleanFreebuffTail(lines: string[]): string[] {
       continue;
     }
     if (
-      /Enter a coding task|Add to the current task|for history|for help|End session|DeepSeek V4\.1 Flash Fast|model to change|Show\s+\d+\s+more\s+lines?|Show\s+more\s+lines?|·\s*Chat:|(?:thinking|working)\.\.\.|\b\d+[hm]\s+left\b/i.test(
+      /Enter a coding task|Add to the current task|for history|for help|←\s*for history|\?\s*for help|End session|DeepSeek V4\.1 Flash Fast|model to change|Show\s+\d+\s+more\s+lines?|Show\s+more\s+lines?|·\s*Chat:|(?:thinking|working)\.\.\.|\b\d+[hm]\s+left\b|Muse Ember|Claude Haiku|GPT-6\.1 Terra|STANDARD · Free|Free and low-cost models|PREMIUM|choose model|Tab reasoning|Enter select|Esc cancel|^\s*\d+x\s*$/i.test(
         line,
       )
     ) {
+      continue;
+    }
+    // Keep box-drawing tables intact so the renderer can turn the raw
+    // terminal table into an HTML table. The old cleanup stripped every
+    // column separator and left fragments like "│ 1" floating in the log.
+    if (/[┌┐└┘├┤┬┴┼]/.test(line) || /^\s*[│┃]/.test(line)) {
+      cleaned.push(line.trimEnd());
       continue;
     }
     if (/^\s*[█▀▄]/.test(line)) continue;
@@ -2002,43 +2309,274 @@ function cleanFreebuffTail(lines: string[]): string[] {
   return cleaned;
 }
 
+type TerminalTool = {
+  name: string;
+  command: string;
+  running: boolean;
+};
+
+type TerminalBlock = {
+  kind: 'text' | 'thinking' | 'command' | 'stamp' | 'table';
+  lines: string[];
+  table?: TerminalTable;
+  tool?: TerminalTool;
+};
+
+function commandMeta(line: string): TerminalTool | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const prefixed = /^(?:\$|›|❯|➜|⏵|•|●|⏺|✓|✔|☑|→)\s+/.test(trimmed);
+  const namedPrefix = /^(?:bash|shell|sh|exec(?:ute)?|command|terminal|tool)\s*[:：]/i.test(trimmed);
+  if (!prefixed && !namedPrefix) return null;
+  const cleaned = trimmed.replace(/^(?:\$|›|❯|➜|⏵|•|●|⏺|✓|✔|☑|→)\s*/, '');
+  const nameMatch = cleaned.match(
+    /^(bash|shell|sh|exec(?:ute)?|run|ran|command|read(?:_file)?|write(?:_file)?|edit(?:_file)?|glob|grep|search|apply(?:[_\s-]?patch)?|patch|task|todo(?:write)?|webfetch|fetch|browser|terminal|tool)\b/i,
+  );
+  if (!nameMatch) {
+    // Plain `$ command` rows are shell calls too.
+    if (/^\$\s+/.test(trimmed)) {
+      return {
+        name: 'bash',
+        command: cleaned,
+        running: /(?:…|\.\.\.|running|in progress|실행 중)$/i.test(trimmed),
+      };
+    }
+    return null;
+  }
+  let name = nameMatch[1].toLowerCase().replace(/[_\s-]/g, '');
+  let command = cleaned
+    .slice(nameMatch[0].length)
+    .replace(/^[\s:：—–-]+/, '')
+    .trim();
+  // Some TUIs render `Ran bash <command>` / `Ran command: <command>`.
+  if (name === 'ran' || name === 'run') {
+    const nested = command.match(
+      /^(bash|shell|sh|exec(?:ute)?|command|read(?:_file)?|write(?:_file)?|edit(?:_file)?|glob|grep|search|apply(?:[_\s-]?patch)?|patch|task|todo(?:write)?|webfetch|fetch|browser|terminal|tool)\b[\s:：-]*(.*)$/i,
+    );
+    if (nested) {
+      name = nested[1].toLowerCase().replace(/[_\s-]/g, '');
+      command = nested[2].trim() || command;
+    } else {
+      name = 'bash';
+    }
+  }
+  if (!command) return null;
+  return {
+    name,
+    command,
+    running: /(?:…|\.\.\.|running|in progress|실행 중)$/i.test(trimmed),
+  };
+}
+
 function terminalLineClass(line: string) {
   if (/-?\s*Thinking\b|추론\s*상황/i.test(line)) return 'thinking';
-  if (/^\s*\$\s/.test(line)) return 'command';
+  if (commandMeta(line)) return 'command';
   if (/^\s*\[\d{1,2}:\d{2}\s*(?:AM|PM)\]/i.test(line)) return 'stamp';
   return '';
 }
 
-function terminalBlocks(lines: string[]) {
-  const blocks: { kind: 'text' | 'thinking' | 'command' | 'stamp'; lines: string[] }[] = [];
+type TerminalTable = { header: string[]; rows: string[][] };
+
+function tableCells(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.includes('|')) return null;
+  const cells = trimmed
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+  return cells.length >= 2 ? cells : null;
+}
+
+function pipeTableAt(lines: string[], start: number): { table: TerminalTable; length: number } | null {
+  const header = tableCells(lines[start] || '');
+  const divider = tableCells(lines[start + 1] || '');
+  if (!header || !divider || divider.length !== header.length) return null;
+  if (!divider.every((cell) => /^:?-{3,}:?$/.test(cell))) return null;
+  const rows: string[][] = [];
+  let end = start + 2;
+  while (end < lines.length) {
+    const row = tableCells(lines[end]);
+    if (!row) break;
+    rows.push(row);
+    end += 1;
+  }
+  if (rows.length === 0) return null;
+  return { table: { header, rows }, length: end - start };
+}
+
+function boxTableAt(lines: string[], start: number): { table: TerminalTable; length: number } | null {
+  const top = (lines[start] || '').trim();
+  if (!/^[┌┏╭]/.test(top)) return null;
+  let end = start + 1;
+  while (end < lines.length && !/^[└┗╰]/.test((lines[end] || '').trim())) end += 1;
+  if (end >= lines.length) return null;
+  const inside = lines.slice(start + 1, end);
+  const content = inside
+    .map((line) => line.split(/[│┃║]/).slice(1, -1).map((cell) => cell.trim()))
+    .filter((cells) => cells.length >= 2 && cells.some(Boolean));
+  if (content.length < 2) return null;
+  const separator = inside.findIndex((line) => /[├┼╞╪]/.test(line));
+  const splitAt = separator >= 0
+    ? inside.slice(0, separator).filter((line) => /[│┃║]/.test(line)).length
+    : 0;
+  const header = splitAt > 0 ? content[splitAt - 1] : content[0];
+  const rows = content.filter((_, index) => index !== (splitAt > 0 ? splitAt - 1 : 0));
+  if (rows.length === 0) return null;
+  return { table: { header, rows }, length: end - start + 1 };
+}
+
+function terminalBlocks(lines: string[]): TerminalBlock[] {
+  const blocks: TerminalBlock[] = [];
   let inThinking = false;
-  for (const line of lines) {
-    const explicit = terminalLineClass(line);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const table = pipeTableAt(lines, index) || boxTableAt(lines, index);
+    if (table) {
+      blocks.push({ kind: 'table', lines: [], table: table.table });
+      index += table.length - 1;
+      inThinking = false;
+      continue;
+    }
+    // A rejected box is usually terminal chrome. Tool rows can live inside a
+    // box, so keep their inner text instead of discarding the command with the
+    // border. Pure borders are still dropped.
+    if (/[┌┐└┘├┤┬┴┼]/.test(line)) continue;
+    let contentLine = line;
+    if (/^\s*[│┃]/.test(line)) {
+      contentLine = line
+        .replace(/^\s*[│┃]\s?/, '')
+        .replace(/\s*[│┃]\s*$/, '')
+        .trimEnd();
+      if (!contentLine.trim()) continue;
+    }
+    const explicit = terminalLineClass(contentLine);
     // Freebuff prints the gray reasoning block under `• Thinking` with a
     // deeper indent than the answer. Keep those wrapped lines in the same
     // gray block instead of leaking them into the normal answer.
-    const reasoningLine = inThinking && /^\s{4,}\S/.test(line);
+    const reasoningLine = inThinking && /^\s{4,}\S/.test(contentLine);
     const kind = (explicit || (reasoningLine ? 'thinking' : 'text')) as
       | 'text'
       | 'thinking'
       | 'command'
       | 'stamp';
     if (explicit === 'thinking') inThinking = true;
-    else if (kind === 'text' && /^\s{0,3}\S/.test(line)) inThinking = false;
+    else if (kind === 'text' && /^\s{0,3}\S/.test(contentLine)) inThinking = false;
+    if (kind === 'command') {
+      const tool = commandMeta(contentLine);
+      if (tool) {
+        // Every invocation gets its own tool card. Do not swallow the whole
+        // command (or its arguments) into one generic TOOL text block.
+        blocks.push({ kind, lines: [contentLine], tool });
+        continue;
+      }
+    }
     const last = blocks[blocks.length - 1];
-    if (last && last.kind === kind) last.lines.push(line);
-    else blocks.push({ kind, lines: [line] });
+    if (last && last.kind === kind) last.lines.push(contentLine);
+    else blocks.push({ kind, lines: [contentLine] });
   }
   return blocks;
 }
 
+function TerminalBlockContent({ block }: { block: TerminalBlock }) {
+  if (block.kind === 'table' && block.table) {
+    return (
+      <div className="desk-term-block table">
+        <div className="desk-term-table-wrap">
+          <table className="desk-term-table">
+            <thead>
+              <tr>
+                {block.table.header.map((cell, index) => (
+                  <th key={`${index}-${cell.slice(0, 12)}`}>{cell || '—'}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.table.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${cellIndex}-${cell.slice(0, 12)}`}>{cell || '—'}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.kind === 'command') {
+    const tool = block.tool;
+    return (
+      <details className="desk-tool-card">
+        <summary>
+          <span className={`desk-tool-check ${tool?.running ? 'running' : ''}`}>
+            {tool?.running ? <Loader2 size={11} className="spin" /> : <Check size={11} />}
+          </span>
+          <span className="desk-tool-terminal">
+            <Terminal size={12} />
+          </span>
+          <strong>{tool?.name || 'bash'}</strong>
+          <code title={tool?.command || block.lines.join('\n')}>
+            {tool?.command || block.lines.join(' ')}
+          </code>
+          <small>{tool?.running ? '실행 중' : '완료'}</small>
+          <ChevronDown size={12} className="desk-tool-chev" />
+        </summary>
+        <pre>{block.lines.join('\n')}</pre>
+      </details>
+    );
+  }
+
+  return (
+    <div className={`desk-term-block ${block.kind}`}>
+      {block.kind === 'thinking' && (
+        <div className="desk-term-block-label">THINKING</div>
+      )}
+      {block.lines.map((line, index) => (
+        <div className={`desk-term-line ${block.kind}`} key={`${index}-${line.slice(0, 18)}`}>
+          {line || '\u00a0'}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function freebuffStatus(lines: string[], working: boolean) {
   const joined = lines.join(' ');
+  // The footer always carries the active model. Picker rows can contain
+  // every model name, so prefer the footer when the model sheet is open.
+  const footer =
+    [...lines].reverse().find((line) => /\/model to change|Chat:\s*/i.test(line)) || '';
+  const statusSource = footer || joined;
+  const knownModels = [...FREEBUFF_PICKER_MODELS].sort(
+    (left, right) => right.label.length - left.label.length,
+  );
+  const model = knownModels.find((option) => statusSource.includes(option.label)) ?? null;
+  const hours = joined.match(/(\d+)\s*\/\s*(\d+)\s+hours remaining/i);
+  const remainingHours = hours ? Number(hours[1]) : null;
+  const totalHours = hours ? Number(hours[2]) : null;
+  const usedHours =
+    remainingHours !== null && totalHours !== null
+      ? Math.max(0, totalHours - remainingHours)
+      : null;
+  // Freebuff's footer uses compact human time (`41m left`, `1h 20m left`)
+  // rather than the older `N/M hours remaining` form. Accept both, including
+  // day/second fragments, so the timer does not fall back to context size.
+  const left =
+    joined.match(
+      /((?:\d+\s*d(?:\s+\d+\s*h)?(?:\s+\d+\s*m)?)|(?:\d+\s*h(?:\s+\d+\s*m)?(?:\s+\d+\s*s)?)|(?:\d+\s*m(?:\s+\d+\s*s)?)|(?:\d+\s*s))\s+left\b/i,
+    )?.[1] ?? null;
   return {
-    left: joined.match(/(\d+h(?:\s*\d+m)?|\d+m(?:\s*\d+s)?)\s+left\b/i)?.[1] ?? null,
-    planLeft: joined.match(/(\d+\/\d+)\s+hours remaining/i)?.[1] ?? null,
-    model: joined.match(/DeepSeek V4\.1 Flash(?: Fast| Slow)?/i)?.[0] ?? null,
-    effort: joined.match(/(?:•|·|effort[:=]?)\s*(max|high|low)\b/i)?.[1]?.toLowerCase() ?? null,
+    left: left?.replace(/\s+/g, ' ').trim() ?? null,
+    planLeft: hours ? `${hours[1]}/${hours[2]}` : null,
+    hoursRemaining: remainingHours,
+    totalHours,
+    usedHours,
+    model: model?.label ?? null,
+    modelMultiplier: model?.multiplier ?? null,
+    effort: statusSource.match(/(?:•|·|effort[:=]?)\s*(max|high|medium|low)\b/i)?.[1]?.toLowerCase() ?? null,
     context: joined.match(/(\d+(?:\.\d+)?[KkMm]?)\s*\(\s*(\d+(?:\.\d+)?)%\s*\)/)?.[1] ?? null,
     contextPercent: Number(
       joined.match(/(\d+(?:\.\d+)?[KkMm]?)\s*\(\s*(\d+(?:\.\d+)?)%\s*\)/)?.[2] ?? NaN,
@@ -2048,14 +2586,422 @@ function freebuffStatus(lines: string[], working: boolean) {
   };
 }
 
+
+function selectedFreebuffPickerModel(lines: string[]): string | null {
+  for (const line of lines) {
+    const match = line.match(/[│┃║]\s*›\s*(.+?)\s*•/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return null;
+}
+type AgyGroup =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'thinking'; texts: string[] }
+  | { kind: 'tools'; tools: TranscriptEntry[] };
+
+function agyToolDisplay(name: string) {
+  const normalized = String(name || '').toLowerCase();
+  if (
+    normalized.includes('execute') ||
+    normalized.includes('bash') ||
+    normalized.includes('shell')
+  ) {
+    return { kind: 'bash', label: 'bash', Icon: Terminal };
+  }
+  if (
+    normalized.includes('read') ||
+    normalized.includes('glob') ||
+    normalized.includes('grep') ||
+    normalized.includes('search')
+  ) {
+    return { kind: 'read', label: 'read', Icon: Search };
+  }
+  if (
+    normalized.includes('edit') ||
+    normalized.includes('write') ||
+    normalized.includes('patch')
+  ) {
+    return { kind: 'write', label: 'edit', Icon: Save };
+  }
+  if (normalized.includes('web') || normalized.includes('fetch')) {
+    return { kind: 'web', label: 'web', Icon: FileText };
+  }
+  return { kind: 'tool', label: 'tool', Icon: Wrench };
+}
+
+function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
+  const meta = agyToolDisplay(tool.name || '');
+  const state = String(tool.state || 'completed').toLowerCase();
+  const running = state === 'running' || state === 'pending';
+  const failed = state === 'failed' || state === 'error';
+  const label = running ? '실행 중' : failed ? '실패' : '완료';
+  const Icon = meta.Icon;
+
+  return (
+    <details className={`tool real desk-agy-tool ${failed ? 'failed' : ''}`}>
+      <summary className="tool-main">
+        <span className={`tool-status ${running ? 'running' : failed ? 'error' : 'done'}`}>
+          {running ? (
+            <Loader2 size={13} className="spin" />
+          ) : failed ? (
+            <X size={13} />
+          ) : (
+            <Check size={13} strokeWidth={3} />
+          )}
+        </span>
+        <span className={`tool-ico kind-${meta.kind}`}>
+          <Icon size={14} />
+        </span>
+        <span className="tool-kind">{meta.label}</span>
+        <span className="tool-name">{tool.name || meta.label}</span>
+        <span className="tool-time">{label}</span>
+        <ChevronDown size={14} className="tool-chev" />
+      </summary>
+      <div className="tool-detail">
+        <div className="tool-detail-label">ORCA TOOL</div>
+        <pre className="tool-args">{`${tool.name || meta.label}\nstate: ${state}`}</pre>
+      </div>
+    </details>
+  );
+}
+
+function AgyThinking({ texts, busy }: { texts: string[]; busy: boolean }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="thinking desk-agy-thinking">
+      <button
+        className="thinking-head"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        {open ? (
+          <ChevronDown size={15} className="chev open" />
+        ) : (
+          <ChevronRight size={15} className="chev" />
+        )}
+        <span>생각</span>
+        {busy && <span className="thinking-live" />}
+      </button>
+      {open && (
+        <div className="thinking-body reasoning-body">
+          {texts.map((text, index) => (
+            <p key={`${index}-${text.slice(0, 16)}`}>{text}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgyChatThread({
+  entries,
+  busy,
+  copied,
+  onCopy,
+  onRefresh,
+}: {
+  entries: TranscriptEntry[];
+  busy: boolean;
+  copied: boolean;
+  onCopy: () => void;
+  onRefresh: () => void;
+}) {
+  const groups = useMemo(() => {
+    const next: AgyGroup[] = [];
+    for (const entry of entries) {
+      if (entry.kind === 'tool') {
+        const last = next[next.length - 1];
+        if (last?.kind === 'tools') last.tools.push(entry);
+        else next.push({ kind: 'tools', tools: [entry] });
+        continue;
+      }
+      if (entry.kind === 'thinking' || entry.kind === 'reasoning') {
+        if (!entry.text?.trim()) continue;
+        const last = next[next.length - 1];
+        if (last?.kind === 'thinking') last.texts.push(entry.text);
+        else next.push({ kind: 'thinking', texts: [entry.text] });
+        continue;
+      }
+      if (entry.kind === 'message' && entry.text?.trim()) {
+        next.push({
+          kind: entry.role === 'user' ? 'user' : 'assistant',
+          text: entry.text,
+        });
+      }
+    }
+    return next;
+  }, [entries]);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="desk-agy-thread">
+      {groups.map((group, index) => {
+        if (group.kind === 'user') {
+          return (
+            <div className="desk-agy-user" key={`user-${index}`}>
+              {group.text}
+            </div>
+          );
+        }
+        if (group.kind === 'thinking') {
+          return (
+            <AgyThinking
+              key={`thinking-${index}`}
+              texts={group.texts}
+              busy={busy && index === groups.length - 1}
+            />
+          );
+        }
+        if (group.kind === 'tools') {
+          return (
+            <div className="tools desk-agy-tools" key={`tools-${index}`}>
+              {group.tools.map((tool, toolIndex) => (
+                <AgyToolRow key={`tool-${index}-${toolIndex}-${tool.name || 'tool'}`} tool={tool} />
+              ))}
+            </div>
+          );
+        }
+        return (
+          <div className="assistant-text desk-agy-answer" key={`assistant-${index}`}>
+            <TranscriptMarkdown text={group.text} className="desk-agy-md" />
+          </div>
+        );
+      })}
+      {busy && (
+        <div className="desk-agy-working">
+          <Loader2 size={14} className="spin" />
+          <span>생각하는 중…</span>
+        </div>
+      )}
+      <div className="msg-meta desk-agy-meta">
+        <div className="meta-actions">
+          <button className="meta-btn" onClick={onCopy} aria-label={copied ? '복사됨' : '대화 복사'}>
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          <button className="meta-btn" onClick={onRefresh} aria-label="대화 새로고침">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+        <span className="meta-time">Agy · Orca chat</span>
+      </div>
+    </div>
+  );
+}
+
+type HandoffEntry = {
+  kind: string;
+  role?: string;
+  text?: string;
+  name?: string;
+  command?: string;
+};
+
+function clipHandoff(text: string | undefined, max: number): string {
+  const value = String(text || '').replace(/\r/g, '').trim();
+  if (!value) return '';
+  return value.length > max ? `${value.slice(0, max).trimEnd()}…` : value;
+}
+
+function buildHandoffBrief(agent: OrcaAgent, entries: HandoffEntry[], tail: string[]): string {
+  const users: string[] = [];
+  const assistants: string[] = [];
+  const tools: string[] = [];
+  for (const entry of entries) {
+    if (entry.kind === 'message') {
+      if (entry.role === 'user' && entry.text) users.push(entry.text);
+      else if (entry.role === 'assistant' && entry.text) assistants.push(entry.text);
+    } else if (entry.kind === 'tool') {
+      const detail = entry.command || entry.name || 'tool';
+      tools.push(detail.split('\n')[0]);
+    }
+  }
+  const fallback = tail.filter((line) => line.trim()).slice(-12).join('\n');
+  const lastUser = clipHandoff(users[users.length - 1] || agent.prompt, 700);
+  const lastAssistant = clipHandoff(assistants[assistants.length - 1] || fallback, 900);
+  const recentTools = tools
+    .slice(-4)
+    .map((tool) => clipHandoff(tool, 160))
+    .filter(Boolean);
+  return [
+    `[인수인계] ${agent.title}`,
+    `워크트리: ${agent.path}`,
+    `브랜치: ${agent.branch || '—'}`,
+    `현재 상태: ${stateLabel(agent.state)}`,
+    lastUser ? `마지막 요청: ${lastUser}` : '',
+    lastAssistant ? `최근 진행: ${lastAssistant}` : '',
+    recentTools.length ? `최근 툴: ${recentTools.join(' / ')}` : '',
+    '이 작업을 이어받아 계속 진행해 주세요. 기존 워크트리와 변경 사항을 먼저 확인하고, 완료되면 결과를 알려주세요.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function HandoffSheet({
+  source,
+  overview,
+  brief,
+  onClose,
+  onSent,
+}: {
+  source: OrcaAgent;
+  overview: OrcaOverview | null;
+  brief: string;
+  onClose: () => void;
+  onSent: (message: string) => void;
+}) {
+  const eligible = (agents: OrcaAgent[]) =>
+    agents.filter(
+      (agent) =>
+        agent.id !== source.id &&
+        (!source.orcaSessionId || agent.orcaSessionId !== source.orcaSessionId) &&
+        Boolean(agent.terminalHandle || agent.orcaSessionId),
+    );
+  const [agents, setAgents] = useState<OrcaAgent[]>(() => eligible(overview?.agents || []));
+  const [toId, setToId] = useState('');
+  const [text, setText] = useState(brief);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void orcaApi
+      .overview(true)
+      .then((next) => {
+        if (!alive) return;
+        setAgents(eligible(next.agents));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // Refresh once when the handoff sheet opens; the overview cache is refreshed
+    // by the desk anyway, but a just-launched worker should be selectable here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.id]);
+
+  useEffect(() => {
+    setToId((current) =>
+      current && agents.some((agent) => agent.id === current) ? current : agents[0]?.id || '',
+    );
+  }, [agents]);
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!toId || !text.trim() || sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      const result = await orcaApi.sendMessage({
+        text: text.trim(),
+        toId,
+        fromId: source.id,
+      });
+      if (result.ok === false || result.error) {
+        throw new Error(result.error || '인수인계 메시지를 전달하지 못했어요.');
+      }
+      const target = agents.find((agent) => agent.id === toId);
+      onSent(target ? `${target.title}에 인수인계했어요` : '인수인계 메시지를 전달했어요');
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '인수인계 메시지를 전달하지 못했어요.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} label="에이전트 인수인계">
+      <div className="sheet-content desk-handoff">
+        <div className="sheet-head">
+          <span className="sheet-title">에이전트 인수인계</span>
+          <span className="sheet-sub">{source.repo}</span>
+          <button
+            type="button"
+            className="sheet-close"
+            onClick={onClose}
+            aria-label="인수인계 닫기"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <form className="desk-handoff-form" onSubmit={send}>
+          <label className="desk-handoff-field">
+            <span>받는 에이전트</span>
+            <SelectMenu
+              value={toId}
+              onChange={setToId}
+              ariaLabel="인수인계 받는 에이전트"
+              placeholder={agents.length ? '에이전트 선택' : '인수인계할 다른 에이전트가 없어요'}
+              disabled={!agents.length}
+              options={agents.map((agent) => ({
+                value: agent.id,
+                label: `${roleLabel(agent.role) ? `[${roleLabel(agent.role)}] ` : ''}${agentMeta(agent.agent).label} · ${agent.title.slice(0, 42)}`,
+                description: `${shortPath(agent.path)} · ${stateLabel(agent.state)}`,
+                meta: relativeTime(agent.updatedAt ?? undefined),
+              }))}
+            />
+          </label>
+          <label className="desk-handoff-field">
+            <span>전달할 작업 요약</span>
+            <textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              maxLength={2000}
+              rows={8}
+              placeholder="이 작업을 이어받을 에이전트에게 전달할 내용"
+            />
+          </label>
+          <div className="desk-handoff-meta">
+            <span>{text.length.toLocaleString('ko-KR')} / 2,000자</span>
+            <span>Orca orchestration으로 전달</span>
+          </div>
+          {!agents.length && (
+            <div className="desk-handoff-empty">
+              <AlertTriangle size={14} />
+              다른 워크트리나 채팅에 에이전트를 먼저 띄워 주세요.
+            </div>
+          )}
+          {error && (
+            <div className="desk-handoff-error" role="alert">
+              <AlertTriangle size={14} />
+              {error}
+            </div>
+          )}
+          <div className="desk-handoff-actions">
+            <button type="button" className="desk-btn ghost" onClick={onClose} disabled={sending}>
+              취소
+            </button>
+            <button
+              type="submit"
+              className="desk-btn"
+              disabled={sending || !toId || !text.trim()}
+            >
+              {sending ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
+              인수인계
+            </button>
+          </div>
+        </form>
+      </div>
+    </Sheet>
+  );
+}
+
 function LogDrawer({
   agent,
+  overview,
+  notify,
   onClose,
   onOverview,
+  onContinue,
 }: {
   agent: OrcaAgent;
+  overview: OrcaOverview | null;
+  notify: (message: string) => void;
   onClose: () => void;
   onOverview: (overview: OrcaOverview) => void;
+  onContinue: (agent: OrcaAgent) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TerminalSnapshot | null>(null);
   const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
@@ -2063,6 +3009,7 @@ function LogDrawer({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [closing, setClosing] = useState(false);
+  const [continuing, setContinuing] = useState(false);
   const [follow, setFollow] = useState(true);
   const [copied, setCopied] = useState(false);
   const [reply, setReply] = useState('');
@@ -2070,16 +3017,40 @@ function LogDrawer({
   const [sendError, setSendError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
   const [lastSent, setLastSent] = useState<string | null>(null);
+  const [sentMessages, setSentMessages] = useState<FreebuffSentMessage[]>(() =>
+    readFreebuffSent(agent.path),
+  );
+  const [freebuffSession, setFreebuffSession] = useState<FreebuffSessionPayload | null>(null);
   const [attachment, setAttachment] = useState<{ path: string; name: string; size: number } | null>(null);
   const [attaching, setAttaching] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
+  const [freebuffPanel, setFreebuffPanel] = useState<'model' | 'usage' | null>(null);
+  const [freebuffClosing, setFreebuffClosing] = useState(false);
+  const [freebuffSwitching, setFreebuffSwitching] = useState(false);
+  const [freebuffTimeLeft, setFreebuffTimeLeft] = useState<string | null>(null);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const loadInFlightRef = useRef(false);
+  const [freebuffModelOverride, setFreebuffModelOverride] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const freebuffPanelTimerRef = useRef<number | undefined>(undefined);
+  const sentPathRef = useRef(agent.path);
   const isFreebuff =
     agent.agent === 'freebuff' ||
-    (agent.agent === 'agent' && /Freebuff/i.test(agent.title));
-  const isShell = agent.agent === 'terminal';
+    /^Freebuff\b/i.test(agent.title) ||
+    /^Freebuff\b/i.test(agent.terminalTitle || '');
+  const isShell = agent.agent === 'terminal' && !isFreebuff;
+  const isChat =
+    !isFreebuff &&
+    (agent.kind === 'chat' ||
+      (!agent.terminalHandle && Boolean(agent.orcaSessionId)));
+  const isAgyChat = isChat && agent.agent === 'antigravity';
+  const { quota: agyQuota } = useAgyQuota(isAgyChat);
+  const displayMeta = isFreebuff
+    ? { id: 'freebuff', label: 'Freebuff', short: 'FB', cls: 'freebuff' }
+    : agentMeta(agent.agent);
   const transcriptEntries = useMemo(
     () =>
       (transcript?.entries || []).filter(
@@ -2093,50 +3064,237 @@ function LogDrawer({
       ),
     [transcript],
   );
-  const hasTranscript = transcriptEntries.length > 0;
+  const agyEntries = useMemo(
+    () =>
+      (transcript?.entries || []).filter(
+        (entry) =>
+          (entry.kind === 'message' ||
+            entry.kind === 'reasoning' ||
+            entry.kind === 'thinking' ||
+            entry.kind === 'tool') &&
+          (entry.kind === 'tool' || (typeof entry.text === 'string' && entry.text.trim())),
+      ),
+    [transcript],
+  );
+  const hasTranscript = isAgyChat ? agyEntries.length > 0 : transcriptEntries.length > 0;
+  const agyBucket = useMemo(() => {
+    const buckets = agyQuota?.groups?.flatMap((group) => group.buckets) || [];
+    return (
+      buckets.find((bucket) => !bucket.disabled && typeof bucket.remaining === 'number') ||
+      buckets[0] ||
+      null
+    );
+  }, [agyQuota]);
+  const agyRemainingPct =
+    typeof agyBucket?.remaining === 'number'
+      ? Math.max(0, Math.min(100, agyBucket.remaining))
+      : 0;
+  const agyTimeLabel = agyBucket?.resetAt ? remainingUntilLabel(agyBucket.resetAt) : null;
+  const agyRemainingLabel = agyBucket?.disabled
+    ? '미적용'
+    : typeof agyBucket?.remaining === 'number'
+      ? `${agyBucket.remaining}%`
+      : '—';
+  // A chat stays a chat even if Orca also exposes a terminal handle for it.
+  const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking = transcript ? transcript.state === 'working' : agent.state === 'working';
   const displayTail = useMemo(
     () => (isFreebuff ? cleanFreebuffTail(snapshot?.tail ?? []) : snapshot?.tail ?? []),
     [isFreebuff, snapshot],
   );
   const displayBlocks = useMemo(() => terminalBlocks(displayTail), [displayTail]);
+  const freebuffFlow = useMemo<DeskFlowItem[]>(() => {
+    if (!isFreebuff || sentMessages.length === 0) {
+      return displayBlocks.map((block, index) => ({
+        kind: 'block' as const,
+        block,
+        key: `block-${index}-${block.kind}`,
+      }));
+    }
+
+    // Put each user turn back into the live log instead of pinning a separate
+    // "sent messages" list below the terminal. New turns know how many output
+    // blocks existed when they were sent; older turns fall back to finding
+    // their echoed prompt in the output.
+    const slots = new Map<number, FreebuffSentMessage[]>();
+    const blockText = displayBlocks.map((block) =>
+      block.lines.join(' ').replace(/\s+/g, ' ').toLowerCase(),
+    );
+    let searchFrom = 0;
+    for (const message of sentMessages) {
+      let position = -1;
+      if (typeof message.afterBlock === 'number') {
+        position = Math.max(0, Math.min(displayBlocks.length, message.afterBlock));
+      } else {
+        const needle = message.text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 64);
+        if (needle) {
+          for (let index = searchFrom; index < blockText.length; index += 1) {
+            if (blockText[index].includes(needle)) {
+              position = index;
+              searchFrom = index + 1;
+              break;
+            }
+          }
+        }
+        if (position < 0) position = displayBlocks.length;
+      }
+      const current = slots.get(position) || [];
+      current.push(message);
+      slots.set(position, current);
+    }
+
+    const flow: DeskFlowItem[] = [];
+    displayBlocks.forEach((block, index) => {
+      for (const message of slots.get(index) || []) {
+        flow.push({ kind: 'message', message, key: `message-${message.id}` });
+      }
+      flow.push({ kind: 'block', block, key: `block-${index}-${block.kind}` });
+    });
+    for (const message of slots.get(displayBlocks.length) || []) {
+      flow.push({ kind: 'message', message, key: `message-${message.id}` });
+    }
+    return flow;
+  }, [displayBlocks, isFreebuff, sentMessages]);
+  const freebuffSessionEntries = useMemo(
+    () =>
+      freebuffSession?.ok && Array.isArray(freebuffSession.entries)
+        ? freebuffSession.entries
+        : [],
+    [freebuffSession],
+  );
+  const lastThinkingIndex = useMemo(() => {
+    for (let index = freebuffSessionEntries.length - 1; index >= 0; index -= 1) {
+      if (freebuffSessionEntries[index].kind === 'thinking') return index;
+    }
+    return -1;
+  }, [freebuffSessionEntries]);
+  const pendingFreebuffMessages = useMemo(() => {
+    if (!freebuffSessionEntries.length) return [];
+    const updatedAt = freebuffSession?.updatedAt || 0;
+    const sessionTexts = new Set(
+      freebuffSessionEntries.flatMap((entry) =>
+        entry.kind === 'message' && entry.role === 'user'
+          ? [entry.text.replace(/\s+/g, ' ').trim()]
+          : [],
+      ),
+    );
+    return sentMessages.filter(
+      (message) =>
+        message.at > updatedAt &&
+        !sessionTexts.has(message.text.replace(/\s+/g, ' ').trim()),
+    );
+  }, [freebuffSession?.updatedAt, freebuffSessionEntries, sentMessages]);
   const freebuffMeta = useMemo(
     () => freebuffStatus(snapshot?.tail ?? [], agent.state === 'working'),
     [agent.state, snapshot],
   );
+  const observedFreebuffTimeLeft =
+    freebuffMeta.left ||
+    (freebuffMeta.hoursRemaining !== null ? `${freebuffMeta.hoursRemaining}시간` : null);
+  useEffect(() => {
+    // Freebuff replaces its `41m left` row with `working...` while a turn is
+    // running. Keep the last observed value instead of dropping the timer.
+    if (observedFreebuffTimeLeft) setFreebuffTimeLeft(observedFreebuffTimeLeft);
+  }, [observedFreebuffTimeLeft]);
+  const freebuffTimeLabel = freebuffTimeLeft;
+  const handoffBrief = useMemo(
+    () =>
+      buildHandoffBrief(
+        agent,
+        isFreebuff ? freebuffSessionEntries : transcriptEntries,
+        displayTail,
+      ),
+    [agent, displayTail, freebuffSessionEntries, isFreebuff, transcriptEntries],
+  );
+  const freebuffModelLabel =
+    freebuffModelOverride || freebuffMeta.model || FREEBUFF_PICKER_MODELS[0].label;
+  const freebuffMultiplier =
+    FREEBUFF_PICKER_MODELS.find((model) => model.label === freebuffModelLabel)?.multiplier ??
+    freebuffMeta.modelMultiplier;
+  const freebuffEffortLabel = freebuffMeta.effort || 'effort';
+  const freebuffContextPct = Number.isFinite(freebuffMeta.contextPercent)
+    ? Math.max(0, Math.min(100, freebuffMeta.contextPercent))
+    : 0;
+  const openFreebuffPanel = (panel: 'model' | 'usage') => {
+    window.clearTimeout(freebuffPanelTimerRef.current);
+    setFreebuffClosing(false);
+    setFreebuffPanel(panel);
+  };
+
+  const closeFreebuffPanel = () => {
+    if (!freebuffPanel) return;
+    window.clearTimeout(freebuffPanelTimerRef.current);
+    setFreebuffClosing(true);
+    freebuffPanelTimerRef.current = window.setTimeout(() => {
+      setFreebuffPanel(null);
+      setFreebuffClosing(false);
+    }, 260);
+  };
+
+  const toggleFreebuffPanel = (panel: 'model' | 'usage') => {
+    if (freebuffPanel === panel && !freebuffClosing) closeFreebuffPanel();
+    else openFreebuffPanel(panel);
+  };
 
   const load = useCallback(async () => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     if (!agent.terminalHandle && !agent.orcaSessionId) {
       setError('이 에이전트의 터미널 핸들을 찾지 못했습니다.');
       setLoading(false);
+      loadInFlightRef.current = false;
       return;
     }
-    if (agent.terminalHandle) {
-      try {
-        const next = await orcaApi.terminal(agent.terminalHandle, {
-          screen: !isFreebuff,
-          limit: isFreebuff ? 2000 : 800,
-        });
-        setSnapshot(next);
-        setError(null);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : '로그를 읽지 못했어요.');
+    try {
+      // Start the structured transcript and Freebuff chat store alongside the
+      // terminal read. Waiting for the terminal first made the chat pane lag a
+      // full round-trip behind the live session while Freebuff was working.
+      if (agent.orcaSessionId) {
+        void orcaApi
+          .transcript(agent.orcaSessionId)
+          .then(setTranscript)
+          .catch(() => undefined);
       }
+      if (isFreebuff) {
+        void orcaApi
+          .freebuffSession(agent.path)
+          .then((next) =>
+            setFreebuffSession((current) =>
+              current &&
+              current.updatedAt === next.updatedAt &&
+              current.entries.length === next.entries.length
+                ? current
+                : next,
+            ),
+          )
+          .catch(() => undefined);
+      }
+      if (agent.terminalHandle) {
+        try {
+          const next = await orcaApi.terminal(agent.terminalHandle, {
+            screen: !isFreebuff,
+            limit: isFreebuff ? 5000 : 800,
+          });
+          setSnapshot(next);
+          setError(null);
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : '로그를 읽지 못했어요.');
+        }
+      }
+    } finally {
+      setLoading(false);
+      loadInFlightRef.current = false;
     }
-    if (agent.orcaSessionId) {
-      void orcaApi
-        .transcript(agent.orcaSessionId)
-        .then(setTranscript)
-        .catch(() => undefined);
-    }
-    setLoading(false);
-  }, [agent.terminalHandle, agent.orcaSessionId]);
+  }, [agent.path, agent.terminalHandle, agent.orcaSessionId, isFreebuff]);
 
   useEffect(() => {
     void load();
+    // Keep the live Freebuff session close to the terminal. 500ms is still
+    // one request at a time (loadInFlightRef), so a slow CLI cannot stack up
+    // a backlog of polls while the pane is open.
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load();
-    }, 1800);
+    }, 500);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -2177,14 +3335,56 @@ function LogDrawer({
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [snapshot, transcript, transcriptEntries.length, view, follow]);
+  }, [
+    snapshot,
+    transcript,
+    transcriptEntries.length,
+    freebuffSession?.updatedAt,
+    freebuffSessionEntries.length,
+    view,
+    follow,
+  ]);
+
+  useEffect(() => {
+    if (!freebuffPanel) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || freebuffClosing) return;
+      event.preventDefault();
+      closeFreebuffPanel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [freebuffClosing, freebuffPanel]);
+
+  useEffect(() => () => window.clearTimeout(freebuffPanelTimerRef.current), []);
+
+  useEffect(() => {
+    setFreebuffModelOverride(null);
+  }, [agent.terminalHandle]);
+
+  useEffect(() => {
+    if (sentPathRef.current === agent.path) return;
+    sentPathRef.current = agent.path;
+    setSentMessages(readFreebuffSent(agent.path));
+    setFreebuffSession(null);
+  }, [agent.path]);
+
+  useEffect(() => {
+    if (sentPathRef.current !== agent.path) return;
+    writeFreebuffSent(agent.path, sentMessages);
+  }, [agent.path, sentMessages]);
 
   const copy = async () => {
     if (!snapshot && !hasTranscript) return;
+    const copyEntries = isAgyChat ? agyEntries : transcriptEntries;
     const copyText =
       view === 'chat' && hasTranscript
-        ? transcriptEntries
-            .map((entry) => `${entry.role === 'user' ? 'YOU' : 'AGENT'}: ${entry.text}`)
+        ? copyEntries
+            .map((entry) =>
+              entry.kind === 'tool'
+                ? `TOOL: ${entry.name || 'tool'}${entry.state ? ` (${entry.state})` : ''}`
+                : `${entry.role === 'user' ? 'YOU' : 'AGENT'}: ${entry.text || ''}`,
+            )
             .join('\n\n')
         : displayTail.join('\n');
     try {
@@ -2196,21 +3396,82 @@ function LogDrawer({
     }
   };
 
-  const sendNative = async (command: string) => {
-    if (!agent.terminalHandle || sending) return;
-    setSending(true);
+  const selectFreebuffModel = async (targetLabel: string) => {
+    if (!agent.terminalHandle || freebuffSwitching || sending) return;
+    const targetIndex = FREEBUFF_PICKER_MODELS.findIndex((model) => model.label === targetLabel);
+    if (targetIndex < 0) return;
+    if (freebuffModelLabel === targetLabel) {
+      closeFreebuffPanel();
+      return;
+    }
+
+    const handle = agent.terminalHandle;
+    const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const press = async (key: 'up' | 'down' | 'enter' | 'escape') => {
+      const result = await orcaApi.sendTerminalKey(handle, key);
+      if (!result.ok) throw new Error(result.error || '키를 전달하지 못했어요.');
+      await pause(300);
+    };
+    const readSelected = async () => {
+      const snap = await orcaApi.terminal(handle, { screen: true, limit: 400 });
+      return selectedFreebuffPickerModel(snap.tail ?? []);
+    };
+
+    setFreebuffSwitching(true);
     setSendError(null);
     try {
-      const sent = await orcaApi.sendTerminal(agent.terminalHandle, command);
-      if (!sent.ok) throw new Error(sent.error || '터미널 입력을 전달하지 못했어요.');
-      setSent(true);
-      setLastSent(command);
+      const opened = await orcaApi.sendTerminal(handle, '/model', {
+        focus: false,
+        waitSubmit: false,
+      });
+      if (!opened.ok) throw new Error(opened.error || '모델 피커를 열지 못했어요.');
+      await pause(850);
+
+      let selected = await readSelected();
+      if (!selected) throw new Error('Freebuff 모델 피커가 열리지 않았어요.');
+
+      // Walk up to the first picker row without depending on the current
+      // model. Freebuff's picker wraps, so stop as soon as the first row is
+      // highlighted rather than sending a fixed number of keys.
+      const first = FREEBUFF_PICKER_MODELS[0].label;
+      for (let step = 0; step < FREEBUFF_PICKER_MODELS.length + 2; step += 1) {
+        if (selected === first) break;
+        await press('up');
+        selected = await readSelected();
+      }
+      if (selected !== first) throw new Error('피커의 첫 모델로 이동하지 못했어요.');
+
+      for (let step = 0; step < targetIndex; step += 1) {
+        await press('down');
+      }
+      await press('enter');
+      await pause(900);
+
+      // Confirm the footer, not just the picker highlight. This is the part
+      // that previously made a successful switch look like it did nothing:
+      // the sheet closed while the old DeepSeek fallback stayed on screen.
+      const confirmed = freebuffStatus(
+        (await orcaApi.terminal(handle, { screen: true, limit: 400 })).tail ?? [],
+        false,
+      ).model;
+      if (confirmed && confirmed !== targetLabel) {
+        throw new Error(`모델이 ${confirmed}(으)로 남아 있어요. 다시 선택해 주세요.`);
+      }
+      setFreebuffModelOverride(targetLabel);
       setView('terminal');
-      window.setTimeout(() => setSent(false), 1600);
+      closeFreebuffPanel();
+      // Do not hold the controls hostage while a 2s terminal refresh happens;
+      // the next model can be selected immediately.
+      void load();
     } catch (cause) {
-      setSendError(cause instanceof Error ? cause.message : '네이티브 명령을 전달하지 못했어요.');
+      setSendError(cause instanceof Error ? cause.message : '모델을 바꾸지 못했어요.');
+      try {
+        await orcaApi.sendTerminalKey(handle, 'escape');
+      } catch {
+        // The next terminal refresh will show the picker state.
+      }
     } finally {
-      setSending(false);
+      setFreebuffSwitching(false);
     }
   };
 
@@ -2227,10 +3488,8 @@ function LogDrawer({
     }
   };
 
-  const attachFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  const uploadFile = async (file: File) => {
+    if (attaching) return;
     if (file.size > 20 * 1024 * 1024) {
       setSendError('파일은 20MB 이하만 전송할 수 있어요.');
       return;
@@ -2246,6 +3505,20 @@ function LogDrawer({
     });
     if (!data) return;
     await attachData(file.name, data);
+  };
+
+  const attachFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    void uploadFile(file);
+  };
+
+  const dropFile = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void uploadFile(file);
   };
 
   const attachUrl = async () => {
@@ -2265,7 +3538,8 @@ function LogDrawer({
 
   const sendReply = async (event?: FormEvent) => {
     event?.preventDefault();
-    const text = [reply.trim(), attachment ? `첨부 파일: ${attachment.path}` : '']
+    const outgoingText = reply.trim();
+    const text = [outgoingText, attachment ? `첨부 파일: ${attachment.path}` : '']
       .filter(Boolean)
       .join('\n\n');
     if (!text || sending) return;
@@ -2295,11 +3569,27 @@ function LogDrawer({
       setAttachment(null);
       setSent(true);
       setLastSent(text);
+      if (isFreebuff) {
+        setSentMessages((current) =>
+          [
+            ...current,
+            {
+              id: `fb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+              text: outgoingText || (attachment ? `첨부 파일: ${attachment.name}` : text),
+              at: Date.now(),
+              afterBlock: displayBlocks.length,
+            },
+          ].slice(-FREEBUFF_SENT_LIMIT),
+        );
+      }
       setView(isFreebuff || isShell ? 'terminal' : 'chat');
       window.setTimeout(() => setSent(false), 1600);
       const refresh = () => {
         if (agent.orcaSessionId) {
           void orcaApi.transcript(agent.orcaSessionId).then(setTranscript).catch(() => undefined);
+        }
+        if (isFreebuff) {
+          void orcaApi.freebuffSession(agent.path).then(setFreebuffSession).catch(() => undefined);
         }
       };
       window.setTimeout(refresh, 700);
@@ -2327,6 +3617,48 @@ function LogDrawer({
     }
   };
 
+  const continueSession = async () => {
+    if (!isFreebuff || continuing) return;
+    // The button is already an explicit action. Resume immediately instead of
+    // interrupting the flow with a browser confirmation dialog.
+    setContinuing(true);
+    setSendError(null);
+    setError(null);
+    try {
+      const result = await orcaApi.continueFreebuff({
+        handle: agent.terminalHandle,
+        path: agent.path,
+        chatId: freebuffSession?.chatId || null,
+      });
+      onOverview(result.overview);
+      const next = result.overview.agents.find((item) => item.terminalHandle === result.handle);
+      onContinue(
+        next ?? {
+          id: `freebuff-continue:${result.handle}`,
+          orcaSessionId: null,
+          agent: 'freebuff',
+          state: 'waiting',
+          title: result.title || 'Freebuff continue',
+          prompt: '',
+          worktreeId: agent.worktreeId,
+          repo: agent.repo,
+          path: result.path || agent.path,
+          branch: agent.branch,
+          terminalHandle: result.handle,
+          terminalTitle: result.title,
+          terminalPreview: '',
+          terminalConnected: true,
+          updatedAt: Date.now(),
+          interrupted: false,
+        },
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Freebuff 세션을 이어서 열지 못했어요.');
+    } finally {
+      setContinuing(false);
+    }
+  };
+
   const terminate = async () => {
     if (!agent.terminalHandle || closing) return;
     if (!window.confirm('이 터미널을 종료할까요? 실행 중인 에이전트 작업이 중단됩니다.')) return;
@@ -2345,70 +3677,120 @@ function LogDrawer({
   return createPortal(
     <div className="desk-drawer-layer">
       <div className="desk-drawer-backdrop" onClick={onClose} />
-      <aside className="desk-log-panel" role="dialog" aria-modal="true" aria-label="에이전트 로그">
+      <aside className={`desk-log-panel ${isFreebuff ? 'is-freebuff' : ''}`} role="dialog" aria-modal="true" aria-label="에이전트 로그">
         <div className="desk-log-head">
           <div className="desk-log-title">
-            <span className={`desk-agent-badge ${agentMeta(agent.agent).cls}`}>
-              {agentMeta(agent.agent).short}
+            <span className={`desk-agent-badge ${displayMeta.cls}`}>
+              <AgentMark id={displayMeta.id} short={displayMeta.short} />
             </span>
             <div>
-              <strong>{agent.title}</strong>
+              <strong title={agent.title}>
+                {agent.role && (
+                  <em className={`desk-role ${agent.role}`}>{roleLabel(agent.role)}</em>
+                )}
+                {isFreebuff ? 'Freebuff' : agent.title}
+              </strong>
               <span>
-                {agentMeta(agent.agent).label} · {agent.repo} / {agent.path.split('/').pop()}
+                {isFreebuff
+                  ? `${agent.repo} / ${agent.path.split('/').pop()}`
+                  : `${displayMeta.label} · ${agent.repo} / ${agent.path.split('/').pop()}`}
               </span>
             </div>
           </div>
           <div className="desk-log-actions">
             <button
-              className="desk-btn ghost small"
+              className="desk-icon"
               onClick={() => void copy()}
               disabled={!snapshot && !hasTranscript}
+              title={copied ? '복사됨' : '로그 복사'}
+              aria-label={copied ? '복사됨' : '로그 복사'}
             >
-              {copied ? <Check size={13} /> : <Clipboard size={13} />}
-              {copied ? '복사됨' : '복사'}
+              {copied ? <Check size={15} /> : <Clipboard size={15} />}
             </button>
-            <button className="desk-icon" onClick={() => void load()} aria-label="로그 새로고침">
+            <button
+              className="desk-icon"
+              onClick={() => void load()}
+              title="로그 새로고침"
+              aria-label="로그 새로고침"
+            >
               <RefreshCw size={15} className={loading ? 'spin' : ''} />
+            </button>
+            <button
+              className="desk-icon"
+              onClick={() => setHandoffOpen(true)}
+              title="다른 에이전트에 인수인계"
+              aria-label="다른 에이전트에 인수인계"
+            >
+              <ArrowRightLeft size={15} />
             </button>
             {isFreebuff && (
               <button
-                className="desk-btn ghost small"
+                className="desk-icon"
                 onClick={() => void interrupt()}
                 disabled={interrupting || !agent.terminalHandle}
-                title="현재 작업 중단 (Ctrl+C)"
+                title={interrupted ? '중단됨' : '현재 작업 중단 (Ctrl+C)'}
+                aria-label={interrupted ? '중단됨' : '현재 작업 중단'}
               >
-                {interrupting ? <Loader2 size={13} className="spin" /> : <Pause size={13} />}
-                {interrupted ? '중단됨' : '중단'}
+                {interrupting ? <Loader2 size={15} className="spin" /> : <Pause size={15} />}
+              </button>
+            )}
+            {isFreebuff && (
+              <button
+                className="desk-icon"
+                onClick={() => void continueSession()}
+                disabled={continuing || closing || !agent.path}
+                title="끄고 계속 (freebuff --continue)"
+                aria-label="끄고 계속"
+              >
+                {continuing ? <Loader2 size={15} className="spin" /> : <RotateCcw size={15} />}
+              </button>
+            )}
+            {!isChat && (
+              <button
+                className="desk-icon"
+                onClick={() => void terminate()}
+                disabled={closing || !agent.terminalHandle}
+                title="터미널 종료"
+                aria-label="터미널 종료"
+              >
+                {closing ? <Loader2 size={15} className="spin" /> : <Power size={15} />}
               </button>
             )}
             <button
-              className="desk-btn danger small"
-              onClick={() => void terminate()}
-              disabled={closing || !agent.terminalHandle}
-              title="터미널 종료"
+              className="desk-icon"
+              onClick={onClose}
+              title="로그 닫기"
+              aria-label="로그 닫기"
             >
-              {closing ? <Loader2 size={13} className="spin" /> : <Power size={13} />}
-              종료
-            </button>
-            <button className="desk-icon" onClick={onClose} aria-label="로그 닫기">
               <X size={18} />
             </button>
           </div>
         </div>
 
+        {!isChat && (
         <div className="desk-log-meta">
           <span className={`desk-state ${agent.state}`}>{stateLabel(agent.state)}</span>
           <span className={snapshot?.status === 'running' ? 'live' : ''}>
-            <span className="desk-status-dot working" />
-            {snapshot?.status || 'reading'}
+            <span className={`desk-status-dot ${isThinking ? 'working' : agent.state}`} />
+            {isChat
+              ? isThinking
+                ? 'working'
+                : transcript?.state || agent.state || 'chat'
+              : snapshot?.status || 'reading'}
           </span>
           <span>
             {view === 'chat' && hasTranscript
-              ? `Orca 세션 기록${transcript?.state ? ` · ${transcript.state}` : ''}`
-              : snapshot?.source || 'screen'}
+              ? `${isChat ? 'Orca 채팅' : 'Orca 세션 기록'}${transcript?.state ? ` · ${transcript.state}` : ''}`
+              : isFreebuff && freebuffSessionEntries.length
+                ? `Freebuff 세션 기록 · ${freebuffSessionEntries.length}`
+                : snapshot?.source || (isChat ? 'Orca 채팅' : 'screen')}
           </span>
-          <span>handle {agent.terminalHandle?.replace('term_', '').slice(0, 8) || '—'}</span>
-          {hasTranscript && (
+          <span>
+            {isChat
+              ? 'Orca chat'
+              : `handle ${agent.terminalHandle?.replace('term_', '').slice(0, 8) || '—'}`}
+          </span>
+          {hasTranscript && canShowTerminal && (
             <span className="desk-log-view-toggle">
               <button
                 className={view === 'chat' ? 'active' : ''}
@@ -2431,75 +3813,6 @@ function LogDrawer({
             자동 따라가기
           </button>
         </div>
-
-        {isFreebuff && (
-          <>
-            <div className="desk-log-freebuff-status">
-              <span className={`desk-log-thinking ${isThinking ? 'active' : ''}`}>
-                {isThinking ? '작업 중...' : '대기'}
-              </span>
-              {freebuffMeta.planLeft && <span>사용 가능 {freebuffMeta.planLeft}시간</span>}
-              {isThinking && freebuffMeta.elapsed && <span>경과 {freebuffMeta.elapsed}</span>}
-              <span className="desk-log-esc">
-                <kbd>Esc</kbd> 세션 종료
-              </span>
-            </div>
-
-            <section className="desk-freebuff-usage" aria-label="Freebuff 사용량">
-              <div className="desk-freebuff-usage-head">
-                <span>
-                  <Activity size={12} /> 사용량
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void sendNative('/model')}
-                  disabled={!agent.terminalHandle || sending}
-                  title="Freebuff 네이티브 /model 피커 열기"
-                >
-                  /model로 모델 변경
-                </button>
-              </div>
-              <div className="desk-freebuff-usage-row">
-                <span>컨텍스트</span>
-                <strong>
-                  {freebuffMeta.context
-                    ? `${freebuffMeta.context}${Number.isFinite(freebuffMeta.contextPercent) ? ` (${freebuffMeta.contextPercent}%)` : ''}`
-                    : '작업이 끝나면 표시'}
-                </strong>
-              </div>
-              <div className="bar desk-freebuff-context-bar">
-                <span
-                  className="bar-fill"
-                  style={{
-                    width: `${Number.isFinite(freebuffMeta.contextPercent) ? Math.min(100, Math.max(0, freebuffMeta.contextPercent)) : 0}%`,
-                  }}
-                />
-              </div>
-              <div className="desk-freebuff-usage-row">
-                <span>사용 가능 시간</span>
-                <strong>{freebuffMeta.planLeft ? `${freebuffMeta.planLeft}시간` : '—'}</strong>
-              </div>
-              <div className="desk-freebuff-usage-meta">
-                <span>모델 {freebuffMeta.model || '—'}</span>
-                <span>effort {freebuffMeta.effort || '—'}</span>
-                <span>매일 초기화</span>
-              </div>
-              <p>사용 가능 시간은 분 카운트다운이 아니라 오늘 남은 시간입니다 · 토큰·추론은 CLI가 노출하지 않습니다.</p>
-            </section>
-
-            <details className="desk-freebuff-model-guide">
-              <summary>모델 3종 · 1시간 세션 기준</summary>
-              <div>
-                {FREEBUFF_MODELS.map((freebuffModel) => (
-                  <div className="desk-freebuff-model" key={freebuffModel.id}>
-                    <strong>{freebuffModel.label}</strong>
-                    <span>{freebuffModel.hours}시간 · {freebuffModel.effort}</span>
-                  </div>
-                ))}
-              </div>
-              <p>/model은 Freebuff 네이티브 명령입니다. 모델을 바꾸면 picker가 열립니다.</p>
-            </details>
-          </>
         )}
 
         {error && !hasTranscript ? (
@@ -2510,7 +3823,7 @@ function LogDrawer({
           </div>
         ) : (
           <div
-            className="desk-log-body"
+            className={`desk-log-body ${isAgyChat ? 'desk-agy-log-body' : ''}`}
             ref={bodyRef}
             onScroll={(event) => {
               const el = event.currentTarget;
@@ -2518,54 +3831,176 @@ function LogDrawer({
             }}
           >
             {view === 'chat' && hasTranscript ? (
-              <div className="desk-transcript">
-                {transcriptEntries.map((entry, index) => {
-                  const thinking = entry.kind === 'reasoning' || entry.kind === 'thinking';
-                  const tool = entry.kind === 'tool';
-                  return (
-                    <article
-                      className={`desk-transcript-entry ${
-                        entry.role === 'user'
-                          ? 'user'
-                          : thinking
-                            ? 'thinking'
-                            : tool
-                              ? 'tool'
-                              : 'assistant'
-                      }`}
-                      key={`${entry.kind}-${entry.role || 'entry'}-${index}`}
-                    >
-                      <span>
-                        {entry.role === 'user' ? 'YOU' : thinking ? 'THINKING' : tool ? 'TOOL' : 'AGENT'}
-                      </span>
-                      <TranscriptMarkdown text={entry.text || ''} />
-                    </article>
-                  );
-                })}
+              isAgyChat ? (
+                <AgyChatThread
+                  entries={agyEntries}
+                  busy={isThinking}
+                  copied={copied}
+                  onCopy={() => void copy()}
+                  onRefresh={() => void load()}
+                />
+              ) : (
+                <div className="desk-transcript">
+                  {transcriptEntries.map((entry, index) => {
+                    const thinking = entry.kind === 'reasoning' || entry.kind === 'thinking';
+                    const tool = entry.kind === 'tool';
+                    return (
+                      <article
+                        className={`desk-transcript-entry ${
+                          entry.role === 'user'
+                            ? 'user'
+                            : thinking
+                              ? 'thinking'
+                              : tool
+                                ? 'tool'
+                                : 'assistant'
+                        }`}
+                        key={`${entry.kind}-${entry.role || 'entry'}-${index}`}
+                      >
+                        <span>
+                          {entry.role === 'user' ? 'YOU' : thinking ? 'THINKING' : tool ? 'TOOL' : 'AGENT'}
+                        </span>
+                        <TranscriptMarkdown text={entry.text || ''} />
+                      </article>
+                    );
+                  })}
+                </div>
+              )
+            ) : isChat ? (
+              <div className="desk-loading">
+                {loading ? <Loader2 size={17} className="spin" /> : <MessageSquare size={17} />}
+                {loading
+                  ? '채팅 기록을 불러오는 중…'
+                  : isThinking
+                    ? '에이전트가 작업 중…'
+                    : '아직 표시할 채팅이 없어요.'}
               </div>
             ) : (
               <div className="desk-terminal-lines">
-                {displayBlocks.length ? (
-                  displayBlocks.map((block, blockIndex) => (
-                    <div
-                      className={`desk-term-block ${block.kind}`}
-                      key={`${blockIndex}-${block.kind}-${block.lines[0]?.slice(0, 18)}`}
-                    >
-                      {block.kind !== 'text' && block.kind !== 'stamp' && (
-                        <div className="desk-term-block-label">
-                          {block.kind === 'thinking' ? 'THINKING' : 'TOOL'}
-                        </div>
-                      )}
-                      {block.lines.map((line, index) => (
-                        <div
-                          className={`desk-term-line ${block.kind}`}
-                          key={`${index}-${line.slice(0, 18)}`}
+                {isFreebuff && freebuffSessionEntries.length ? (
+                  <div className="desk-freebuff-session">
+                    {freebuffSessionEntries.map((entry, index) => {
+                      if (entry.kind === 'message') {
+                        if (entry.role === 'user') {
+                          return (
+                            <article className="desk-freebuff-msg" key={`fb-session-${index}`}>
+                              <p>{entry.text}</p>
+                              {entry.at && (
+                                <div className="desk-freebuff-msg-meta">
+                                  <time>{entry.at}</time>
+                                </div>
+                              )}
+                            </article>
+                          );
+                        }
+                        return (
+                          <article className="desk-freebuff-agent" key={`fb-session-${index}`}>
+                            <TranscriptMarkdown text={entry.text} />
+                          </article>
+                        );
+                      }
+                      if (entry.kind === 'thinking') {
+                        return (
+                          <details
+                            className="desk-freebuff-think"
+                            key={`fb-session-${index}`}
+                            open={index === lastThinkingIndex}
+                          >
+                            <summary>
+                              <ChevronRight size={13} className="desk-think-chev" />
+                              <span>생각</span>
+                              <small>{entry.text.length.toLocaleString('ko-KR')}자</small>
+                            </summary>
+                            <div className="desk-freebuff-think-body">
+                              <TranscriptMarkdown text={entry.text} />
+                            </div>
+                          </details>
+                        );
+                      }
+                      const commandLines = entry.command.split('\n');
+                      const firstLine = freebuffToolHead(entry) || entry.name;
+                      const commandLineCount = commandLines.filter((line) => line.trim()).length;
+                      return (
+                        <details
+                          className="desk-tool-card desk-freebuff-tool"
+                          key={`fb-session-${index}`}
                         >
-                          {line || '\u00a0'}
+                          <summary>
+                            <span className={`desk-tool-check ${entry.running ? 'running' : ''}`}>
+                              {entry.running ? (
+                                <Loader2 size={13} className="spin" />
+                              ) : (
+                                <Check size={13} />
+                              )}
+                            </span>
+                            <span className="desk-tool-terminal">
+                              <Terminal size={13} />
+                            </span>
+                            <strong>{freebuffToolLabel(entry.name)}</strong>
+                            <code title={entry.command}>{firstLine}</code>
+                            {entry.running && <small>실행 중</small>}
+                            <ChevronDown size={12} className="desk-tool-chev" />
+                          </summary>
+                          <div className="desk-freebuff-tool-detail">
+                            <span className="desk-freebuff-tool-label">
+                              COMMAND · {commandLineCount}줄
+                            </span>
+                            <pre>{entry.command || entry.name}</pre>
+                            {entry.output ? (
+                              <>
+                                <span className="desk-freebuff-tool-label">OUTPUT</span>
+                                <pre className="desk-freebuff-tool-output">{entry.output}</pre>
+                              </>
+                            ) : null}
+                          </div>
+                        </details>
+                      );
+                    })}
+                    {pendingFreebuffMessages.map((message) => (
+                      <article className="desk-freebuff-msg" key={`fb-pending-${message.id}`}>
+                        <p>{message.text}</p>
+                        <div className="desk-freebuff-msg-meta">
+                          <time>
+                            {new Date(message.at).toLocaleTimeString('ko-KR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: false,
+                            })}
+                          </time>
                         </div>
-                      ))}
+                      </article>
+                    ))}
+                  </div>
+                ) : freebuffFlow.length ? (
+                  freebuffFlow.map((item) =>
+                    item.kind === 'message' ? (
+                      <article className="desk-freebuff-msg" key={item.key}>
+                        <p>{item.message.text}</p>
+                        <div className="desk-freebuff-msg-meta">
+                          <time dateTime={new Date(item.message.at).toISOString()}>
+                            {new Date(item.message.at).toLocaleTimeString('ko-KR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: false,
+                            })}
+                          </time>
+                        </div>
+                      </article>
+                    ) : (
+                      <TerminalBlockContent key={item.key} block={item.block} />
+                    ),
+                  )
+                ) : isFreebuff ? (
+                  <div className="empty-state desk-freebuff-empty">
+                    <span className="desk-freebuff-empty-mark">
+                      <AgentMark id={displayMeta.id} short={displayMeta.short} />
+                    </span>
+                    <h2>무엇을 도와드릴까요?</h2>
+                    <p>Freebuff가 이 워크트리를 읽고, 실행하고, 파일을 수정합니다.</p>
+                    <div className="empty-hint">
+                      <Terminal size={13} /> Enter로 전송 · Shift+Enter로 줄바꿈
                     </div>
-                  ))
+                  </div>
                 ) : null}
               </div>
             )}
@@ -2573,25 +4008,323 @@ function LogDrawer({
         )}
 
         {isFreebuff && (
-          <form className="desk-log-compose" onSubmit={sendReply}>
+          <form className="desk-log-compose desk-freebuff-compose" onSubmit={sendReply}>
+            <div
+              className={`desk-freebuff-compose-shell ${freebuffPanel ? 'is-expanded' : ''} ${dragActive ? 'is-dragging' : ''}`}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setDragActive(false);
+                }
+              }}
+              onDrop={dropFile}
+            >
+            {freebuffPanel && (
+              <div className={`desk-freebuff-panel-slot ${freebuffClosing ? 'is-closing' : ''}`}>
+                <div className="desk-freebuff-panel-clip">
+            {freebuffPanel === 'model' && (
+              <div
+                className={`inline-panel desk-freebuff-inline-panel ${freebuffClosing ? 'is-closing' : ''}`}
+                role="region"
+                aria-label="Freebuff 모델 선택"
+                aria-hidden={freebuffClosing || undefined}
+              >
+                <div className="inline-panel-scroll">
+                  <div className="sheet-content model-sheet desk-freebuff-model-sheet">
+                    <div className="sheet-head">
+                      <span className="sheet-title">모델</span>
+                      <span className="sheet-sub">Freebuff CLI</span>
+                      <button
+                        type="button"
+                        className="sheet-close"
+                        onClick={closeFreebuffPanel}
+                        disabled={freebuffSwitching}
+                        aria-label="Freebuff 모델 패널 닫기"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                    {freebuffSwitching && (
+                      <div className="desk-freebuff-switching" role="status">
+                        <Loader2 size={13} className="spin" />
+                        모델 피커에서 전환 중…
+                      </div>
+                    )}
+                    <div className="sheet-list">
+                      {FREEBUFF_PICKER_MODELS.map((freebuffModel) => (
+                        <button
+                          type="button"
+                          className={`sheet-row model-row ${
+                            freebuffModelLabel === freebuffModel.label ? 'selected' : ''
+                          }`}
+                          key={freebuffModel.id}
+                          onClick={() => void selectFreebuffModel(freebuffModel.label)}
+                          disabled={freebuffSwitching || !agent.terminalHandle}
+                        >
+                          <span className="model-name">{freebuffModel.label}</span>
+                          <span className="row-provider">
+                            {freebuffModel.multiplier && (
+                              <b className="model-multiplier">{freebuffModel.multiplier}</b>
+                            )}
+                            {freebuffModel.description}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="desk-freebuff-panel-note">
+                      배수는 이 모델의 시간 소모량입니다. 전환 뒤 현재 모델을 터미널에서 다시 확인합니다.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {freebuffPanel === 'usage' && (
+              <div
+                className={`inline-panel desk-freebuff-inline-panel ${freebuffClosing ? 'is-closing' : ''}`}
+                role="region"
+                aria-label="Freebuff 사용량"
+                aria-hidden={freebuffClosing || undefined}
+              >
+                <div className="inline-panel-scroll">
+                  <section className="desk-freebuff-usage usage-sheet">
+                    <div className="sheet-head">
+                      <span className="sheet-title">사용량 한도</span>
+                      <span className="sheet-sub">Freebuff</span>
+                      <button
+                        type="button"
+                        className="sheet-close"
+                        onClick={closeFreebuffPanel}
+                        aria-label="Freebuff 사용량 패널 닫기"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                    <div className="usage-grid">
+                      <div className="usage-cell sheet-anim">
+                        <div className="usage-title">
+                          <span className="status-dot green" />
+                          컨텍스트
+                        </div>
+                        <div className="usage-big">{freebuffMeta.context || '—'}</div>
+                        <div className="usage-sub">
+                          {Number.isFinite(freebuffMeta.contextPercent)
+                            ? `${freebuffMeta.contextPercent}% 사용`
+                            : '작업 후 표시'}
+                        </div>
+                      </div>
+                      <div className="usage-cell sheet-anim">
+                        <div className="usage-title">
+                          <span className="status-dot amber" />
+                          남은 시간
+                        </div>
+                        <div className="usage-big">
+                          {freebuffTimeLabel || '—'}
+                        </div>
+                        <div className={`usage-sub ${freebuffTimeLabel ? '' : 'is-error'}`}>
+                          {freebuffTimeLabel ? (
+                            freebuffMeta.usedHours !== null && freebuffMeta.totalHours !== null
+                              ? `${freebuffMeta.usedHours}h 사용 · 전체 ${freebuffMeta.totalHours}h`
+                              : '오늘 남은 시간'
+                          ) : (
+                            <>
+                              <AlertTriangle size={11} />
+                              남은 시간을 읽지 못했어요
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="usage-list sheet-anim">
+                      <div>
+                        <span>모델</span>
+                        <strong>{freebuffModelLabel}</strong>
+                      </div>
+                      <div>
+                        <span>시간 배수</span>
+                        <strong>{freebuffMultiplier || '—'}</strong>
+                      </div>
+                      <div>
+                        <span>시간 소모</span>
+                        <strong>
+                          {freebuffMeta.usedHours !== null && freebuffMeta.totalHours !== null
+                            ? `${freebuffMeta.usedHours}h / ${freebuffMeta.totalHours}h`
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Effort</span>
+                        <strong>{freebuffEffortLabel}</strong>
+                      </div>
+                      <div>
+                        <span>컨텍스트</span>
+                        <strong>
+                          {freebuffMeta.context
+                            ? `${freebuffMeta.context}${Number.isFinite(freebuffMeta.contextPercent) ? ` (${freebuffMeta.contextPercent}%)` : ''}`
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>세션</span>
+                        <strong>Freebuff CLI</strong>
+                      </div>
+                    </div>
+                    <p className="desk-freebuff-usage-note">
+                      사용 가능 시간은 오늘 남은 시간입니다. 모델은 하단 모델 버튼에서 바꿉니다.
+                    </p>
+                  </section>
+                </div>
+              </div>
+            )}
+                </div>
+              </div>
+            )}
+
+                {dragActive && (
+                  <div className="desk-freebuff-drop-hint" role="status">
+                    <Upload size={15} />
+                    파일을 여기에 놓아 첨부
+                  </div>
+                )}
+                <div className="composer">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="desk-file-input"
+                    onChange={(event) => void attachFile(event)}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  />
+                  <button
+                    type="button"
+                    className="plus-btn"
+                    title="파일 업로드 · 클릭하거나 입력창에 끌어다 놓기 (최대 20MB)"
+                    aria-label="파일 업로드"
+                    disabled={attaching || sending}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {attaching ? <Loader2 size={17} className="spin" /> : <Plus size={19} />}
+                  </button>
+                  <textarea
+                    value={reply}
+                    onChange={(event) => setReply(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendReply();
+                      }
+                    }}
+                    placeholder="Freebuff에 메시지를 입력하세요"
+                    rows={1}
+                    aria-label="Freebuff에 메시지 입력"
+                  />
+                  <button
+                    type="submit"
+                    className={`send-btn ${reply.trim() || attachment ? 'ready' : ''}`}
+                    disabled={(!reply.trim() && !attachment) || sending || (!agent.terminalHandle && !agent.id)}
+                    aria-label={sent ? '전달됨' : '보내기'}
+                  >
+                    {sending ? <Loader2 size={15} className="spin" /> : <ArrowUp size={17} />}
+                  </button>
+                </div>
+            </div>
+                {attachment && (
+                  <div className="desk-log-attachment">
+                    <FileText size={13} />
+                    <div>
+                      <strong>{attachment.name}</strong>
+                      <code>{attachment.path}</code>
+                    </div>
+                    <span>{Math.max(1, Math.round(attachment.size / 1024)).toLocaleString('ko-KR')}KB</span>
+                    <button
+                      type="button"
+                      onClick={() => setAttachment(null)}
+                      aria-label="첨부 제거"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                )}
+
+            <div className="toolbar desk-freebuff-toolbar">
+              <span
+                className={`tb-item desk-freebuff-auto ${isThinking ? 'working' : ''}`}
+                title="Freebuff는 안전한 자동 실행 모드로 동작합니다"
+              >
+                <ShieldCheck size={14} />
+                <span>자동</span>
+              </span>
+              <div className="tb-center desk-freebuff-center">
+                <button
+                  type="button"
+                  className={`tb-item model ${freebuffPanel === 'model' ? 'is-open' : ''}`}
+                  onClick={() => toggleFreebuffPanel('model')}
+                  aria-expanded={freebuffPanel === 'model'}
+                >
+                  <span>{freebuffModelLabel}</span>
+                  {freebuffMultiplier && (
+                    <span className="tb-model-multiplier">{freebuffMultiplier}</span>
+                  )}
+                  <ChevronDown
+                    size={12}
+                    className={`tb-chev ${freebuffPanel === 'model' ? 'flip' : ''}`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="tb-item"
+                  onClick={() => openFreebuffPanel('model')}
+                  title="Effort를 바꾸려면 모델 피커를 엽니다"
+                >
+                  <span>{freebuffEffortLabel}</span>
+                  <ChevronDown size={12} className="tb-chev" />
+                </button>
+              </div>
+              <button
+                type="button"
+                className={`tb-item timer ${isThinking ? 'busy' : 'idle'} ${freebuffPanel === 'usage' ? 'is-open' : ''} ${freebuffTimeLabel ? '' : 'time-error'}`}
+                onClick={() => toggleFreebuffPanel('usage')}
+                aria-label={freebuffTimeLabel ? `Freebuff 남은 시간 ${freebuffTimeLabel}` : 'Freebuff 남은 시간 확인 불가'}
+                title={freebuffTimeLabel ? `남은 시간 ${freebuffTimeLabel}` : '남은 시간을 읽지 못했어요'}
+                aria-expanded={freebuffPanel === 'usage'}
+              >
+                <span
+                  className={`timer-ring ${freebuffTimeLabel ? '' : 'is-missing'}`}
+                  style={{
+                    background: freebuffTimeLabel
+                      ? `conic-gradient(#f2763a 0 ${freebuffContextPct}%, #35251e ${freebuffContextPct}% 360deg)`
+                      : 'conic-gradient(#7c4035 0 100%, #2a211e 100%)',
+                  }}
+                />
+                <span>{freebuffTimeLabel || '시간 확인 불가'}</span>
+              </button>
+            </div>
+            {sendError && (
+              <div className="desk-log-compose-error">
+                <AlertTriangle size={11} />
+                {sendError}
+              </div>
+            )}
+          </form>
+        )}
+        {isChat && (
+          <form className="desk-log-compose desk-agy-compose" onSubmit={sendReply}>
             <div className="composer">
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="desk-file-input"
-                onChange={(event) => void attachFile(event)}
-                tabIndex={-1}
-                aria-hidden="true"
-              />
               <button
                 type="button"
                 className="plus-btn"
-                title="파일 첨부 (서버가 저장하고 경로를 전송)"
-                aria-label="파일 첨부"
-                disabled={attaching || sending}
-                onClick={() => fileInputRef.current?.click()}
+                title="파일 첨부는 Freebuff에서 지원합니다"
+                aria-label="파일 첨부 안내"
+                onClick={() => setSendError('파일 첨부는 Freebuff에서 지원합니다.')}
               >
-                {attaching ? <Loader2 size={17} className="spin" /> : <Plus size={19} />}
+                <Plus size={19} />
               </button>
               <textarea
                 value={reply}
@@ -2602,50 +4335,53 @@ function LogDrawer({
                     void sendReply();
                   }
                 }}
-                placeholder="Freebuff에 메시지를 입력하세요"
+                placeholder={`${isAgyChat ? 'Agy' : displayMeta.label}에게 메시지를 입력하세요`}
                 rows={1}
-                aria-label="Freebuff에 메시지 입력"
+                aria-label="에이전트에 메시지 입력"
               />
               <button
                 type="submit"
-                className={`send-btn ${reply.trim() || attachment ? 'ready' : ''}`}
-                disabled={(!reply.trim() && !attachment) || sending || (!agent.terminalHandle && !agent.id)}
+                className={`send-btn ${reply.trim() ? 'ready' : ''}`}
+                disabled={!reply.trim() || sending || (!agent.terminalHandle && !agent.id)}
                 aria-label={sent ? '전달됨' : '보내기'}
               >
                 {sending ? <Loader2 size={15} className="spin" /> : <ArrowUp size={17} />}
               </button>
             </div>
-            {attachment && (
-              <div className="desk-log-attachment">
-                <FileText size={13} />
-                <div>
-                  <strong>{attachment.name}</strong>
-                  <code>{attachment.path}</code>
-                </div>
-                <span>{Math.max(1, Math.round(attachment.size / 1024)).toLocaleString('ko-KR')}KB</span>
-                <button
-                  type="button"
-                  onClick={() => setAttachment(null)}
-                  aria-label="첨부 제거"
-                >
-                  <X size={13} />
-                </button>
+            <div className="toolbar desk-agy-toolbar">
+              <span className="tb-item desk-agy-auto" title="자동 실행 모드">
+                <ShieldCheck size={14} />
+                <span>자동</span>
+              </span>
+              <div className="tb-center desk-agy-center">
+                <span className="tb-item model">
+                  <span>{isAgyChat ? 'Agy' : displayMeta.label}</span>
+                </span>
+                <span className="tb-item">
+                  <span>Orca</span>
+                </span>
               </div>
-            )}
-            <div className="desk-log-compose-tools">
-              <div className="desk-log-compose-hint">
-                <ShieldCheck size={11} />
-                {sent ? '전달됨' : '현재 터미널로 직접 전달'} · /model 같은 네이티브 명령 그대로 · Shift+Enter 줄바꿈
-              </div>
-              <button type="button" onClick={() => void attachUrl()} disabled={attaching || sending}>
-                URL에서 파일 받기
-              </button>
+              <span
+                className="tb-item timer"
+                title={
+                  isAgyChat
+                    ? agyTimeLabel
+                      ? `${agyTimeLabel} 후 리셋 · ${agyRemainingLabel}`
+                      : `남은 한도 ${agyRemainingLabel}`
+                    : 'Orca 채팅'
+                }
+              >
+                <span
+                  className="timer-ring"
+                  style={{
+                    background: `conic-gradient(#e08a4c 0 ${agyRemainingPct}%, #2a211b ${agyRemainingPct}% 360deg)`,
+                  }}
+                />
+                <span>
+                  {isAgyChat ? agyTimeLabel || agyRemainingLabel : 'chat'}
+                </span>
+              </span>
             </div>
-            {lastSent && (
-              <div className="desk-log-sent" title={lastSent}>
-                <Check size={11} /> 전달됨 · 경로 포함 · 응답 대기 중
-              </div>
-            )}
             {sendError && (
               <div className="desk-log-compose-error">
                 <AlertTriangle size={11} />
@@ -2654,7 +4390,6 @@ function LogDrawer({
             )}
           </form>
         )}
-
         {isShell && (
           <form className="desk-log-compose" onSubmit={sendReply}>
             <div className="composer">
@@ -2699,29 +4434,59 @@ function LogDrawer({
           </form>
         )}
 
-        <div className="desk-log-foot">
-          <span>
-            <Zap size={12} />
-            {snapshot?.fetchedAt
-              ? `${new Date(snapshot.fetchedAt).toLocaleTimeString('ko-KR', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  hour12: false,
-                })} 갱신`
-              : '실시간'}
-          </span>
-          <span>
-            <Terminal size={12} />
-            {view === 'chat' && hasTranscript
-              ? `${transcriptEntries.length} messages`
-              : `${snapshot?.returnedLineCount ?? 0} lines`}
-          </span>
-        </div>
+        {!isChat && (
+          <div className="desk-log-foot">
+            <span>
+              <Zap size={12} />
+              {snapshot?.fetchedAt
+                ? `${new Date(snapshot.fetchedAt).toLocaleTimeString('ko-KR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                  })} 갱신`
+                : '실시간'}
+            </span>
+            <span>
+              <Terminal size={12} />
+              {`${snapshot?.returnedLineCount ?? 0} lines`}
+            </span>
+          </div>
+        )}
+        {handoffOpen && (
+          <HandoffSheet
+            source={agent}
+            overview={overview}
+            brief={handoffBrief}
+            onClose={() => setHandoffOpen(false)}
+            onSent={notify}
+          />
+        )}
       </aside>
     </div>,
     document.body,
   );
+}
+
+type CodexQuotaWindow = {
+  usedPercent: number;
+  windowDurationMins?: number | null;
+  resetsAt?: number | null;
+};
+
+type CodexQuota = {
+  ok?: boolean;
+  plan?: string | null;
+  primary?: CodexQuotaWindow | null;
+  secondary?: CodexQuotaWindow | null;
+  error?: string;
+};
+
+function codexWindowLabel(minutes?: number | null) {
+  if (!minutes) return '';
+  if (minutes >= 10_080) return `${Math.round(minutes / 1_440)}일`;
+  if (minutes >= 60) return `${Math.round(minutes / 60)}시간`;
+  return `${minutes}분`;
 }
 
 function CreditsDrawer({
@@ -2735,6 +4500,9 @@ function CreditsDrawer({
   const [freebuff, setFreebuff] = useState<FreebuffUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [codex, setCodex] = useState<CodexQuota | null>(null);
+  const [codexLoading, setCodexLoading] = useState(true);
+  const [codexError, setCodexError] = useState<string | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -2749,6 +4517,27 @@ function CreditsDrawer({
     }
   }, []);
 
+  const loadCodex = useCallback(async () => {
+    setCodexLoading(true);
+    setCodexError(null);
+    try {
+      const response = await fetch('/codex-api/quota', { credentials: 'include' });
+      const body = (await response.json().catch(() => ({}))) as CodexQuota;
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `Codex 한도 요청 실패 (${response.status})`);
+      }
+      setCodex(body);
+    } catch (cause) {
+      setCodexError(cause instanceof Error ? cause.message : 'Codex 계정 한도를 읽지 못했어요.');
+    } finally {
+      setCodexLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCodex();
+  }, [loadCodex]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -2756,7 +4545,13 @@ function CreditsDrawer({
   const refresh = () => {
     refreshAgy();
     void load(true);
+    void loadCodex();
   };
+
+  const codexWindows = [
+    { label: '5시간', window: codex?.primary },
+    { label: '주간', window: codex?.secondary },
+  ].filter((entry) => entry.window);
 
   return createPortal(
     <div className="desk-drawer-layer">
@@ -2779,7 +4574,7 @@ function CreditsDrawer({
           <section className="desk-credit-node">
             <div className="desk-credit-root">
               <span className="desk-credit-icon freebuff">
-                <Zap size={15} />
+                <AgentMark id="freebuff" short="FB" />
               </span>
               <div>
                 <strong>Freebuff</strong>
@@ -2845,7 +4640,7 @@ function CreditsDrawer({
           <section className="desk-credit-node">
             <div className="desk-credit-root">
               <span className="desk-credit-icon agy">
-                <Sparkles size={15} />
+                <AgentMark id="antigravity" short="AGY" />
               </span>
               <div>
                 <strong>Agy</strong>
@@ -2885,6 +4680,59 @@ function CreditsDrawer({
               <button className="desk-credit-refresh" onClick={refreshAgy} disabled={agyLoading}>
                 <RefreshCw size={12} className={agyLoading ? 'spin' : ''} />
                 Agy 다시 읽기
+              </button>
+            </div>
+          </section>
+
+          <section className="desk-credit-node">
+            <div className="desk-credit-root">
+              <span className="desk-credit-icon codex">
+                <AgentMark id="codex" short="CX" />
+              </span>
+              <div>
+                <strong>Codex</strong>
+                <span>Codex CLI · ChatGPT 계정 한도</span>
+              </div>
+              <span className={`desk-credit-pill ${codex?.plan ? 'ok' : 'warn'}`}>
+                {codexLoading ? '…' : codex?.plan || '확인 불가'}
+              </span>
+            </div>
+            <div className="desk-credit-branch">
+              {codexLoading && !codex ? (
+                <p className="desk-credit-note">Codex 계정 한도를 불러오는 중…</p>
+              ) : codexError && !codex ? (
+                <p className="desk-credit-error">{codexError}</p>
+              ) : codexWindows.length ? (
+                codexWindows.map((entry) => {
+                  const window = entry.window as CodexQuotaWindow;
+                  const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
+                  return (
+                    <div className="desk-credit-bucket" key={entry.label}>
+                      <div>
+                        <span>{codexWindowLabel(window.windowDurationMins) || entry.label}</span>
+                        <strong>{remaining}%</strong>
+                      </div>
+                      <div className="desk-credit-bar">
+                        <span style={{ width: `${remaining}%` }} />
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="desk-credit-note">Codex CLI가 계정 한도 창을 반환하지 않았어요.</p>
+              )}
+              <div className="desk-credit-row">
+                <span>모델</span>
+                <strong>GPT-6 Luna</strong>
+              </div>
+              <div className="desk-credit-row">
+                <span>컨텍스트</span>
+                <strong>272k</strong>
+              </div>
+              {codexError && codex && <p className="desk-credit-error">{codexError}</p>}
+              <button className="desk-credit-refresh" onClick={() => void loadCodex()} disabled={codexLoading}>
+                <RefreshCw size={12} className={codexLoading ? 'spin' : ''} />
+                Codex 다시 읽기
               </button>
             </div>
           </section>

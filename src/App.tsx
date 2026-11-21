@@ -33,6 +33,19 @@ import {
 } from './data';
 
 const PIN_KEY = (sessionID: string) => `agent-web:pins:${sessionID}`;
+const DESK_OPEN_KEY = 'agent-web:desk-open:v1';
+
+function loadDeskOpen(): boolean {
+  try {
+    const stored = localStorage.getItem(DESK_OPEN_KEY);
+    if (stored === '1' || stored === '0') return stored === '1';
+    // Migrate the old session-only value once. Full app restarts lose
+    // sessionStorage, which made the desk forget the open session.
+    return sessionStorage.getItem(DESK_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 function loadPins(sessionID: string | null): PinnedFile[] {
   if (!sessionID) return [];
@@ -58,9 +71,10 @@ export default function App() {
   const codexMode = engine === 'codex';
   const quotaState = useAgyQuota(agent.auth === 'ok' && engine === 'agy');
   const [panel, setPanel] = useState<ComposerPanel>(null);
-  const [deskOpen, setDeskOpen] = useState(false);
+  const [deskOpen, setDeskOpen] = useState(loadDeskOpen);
   const [codexOpen, setCodexOpen] = useState(false);
   const [codexStatsOpen, setCodexStatsOpen] = useState(false);
+  const [codexResetKey, setCodexResetKey] = useState(0);
   const codexScreen = codexMode || codexOpen;
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoTab, setInfoTab] = useState<InfoTab>('info');
@@ -92,6 +106,15 @@ export default function App() {
     const timer = window.setInterval(() => setTick((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [agent.busy]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DESK_OPEN_KEY, deskOpen ? '1' : '0');
+      sessionStorage.removeItem(DESK_OPEN_KEY);
+    } catch {
+      // Storage can be unavailable in embedded browsers.
+    }
+  }, [deskOpen]);
 
   useEffect(
     () => () => {
@@ -269,6 +292,7 @@ export default function App() {
     setSidebarOpen(false);
     setSettingsOpen(false);
     setPanel(null);
+    setCodexResetKey((value) => value + 1);
     try {
       await agent.createSession();
       setDraft('');
@@ -585,6 +609,7 @@ export default function App() {
             onClose={codexMode ? undefined : () => setCodexOpen(false)}
             statsOpen={codexStatsOpen}
             onStatsOpen={setCodexStatsOpen}
+            resetKey={codexResetKey}
           />
         ) : (
         <main

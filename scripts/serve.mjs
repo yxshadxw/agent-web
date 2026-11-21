@@ -14,6 +14,7 @@ const agyBase = `http://127.0.0.1:${agyPort}`;
 const orcaPort = process.env.ORCA_BRIDGE_PORT || '4099';
 const orcaBase = `http://127.0.0.1:${orcaPort}`;
 const auth = ensureAuth(root);
+let shuttingDown = false;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -79,6 +80,13 @@ async function ensureOrcaBridge() {
   });
   child.on('error', (error) => {
     console.error(`  Orca 브리지를 실행하지 못했습니다: ${error.message}`);
+  });
+  child.on('exit', (code, signal) => {
+    if (shuttingDown) return;
+    console.error(`\n  Orca 브리지가 종료됐습니다 (${signal || code || 'unknown'}). 1초 뒤 다시 시작합니다.\n`);
+    setTimeout(() => {
+      if (!shuttingDown) void ensureOrcaBridge();
+    }, 1000);
   });
 
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -148,6 +156,7 @@ async function main() {
   const shutdown = async (signal) => {
     if (closing) return;
     closing = true;
+    shuttingDown = true;
     console.log(`\n  종료 중 (${signal})…`);
     try {
       await server.close();

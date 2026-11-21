@@ -4263,6 +4263,24 @@ button:disabled {
   }
 }
 
+.inline-panel.is-collapsing {
+  pointer-events: none;
+  animation: inlinePanelOut 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes inlinePanelOut {
+  from {
+    opacity: 1;
+    max-height: min(62dvh, 560px);
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(12px) scale(0.992);
+  }
+}
+
 .inline-panel-scroll {
   max-height: inherit;
   overflow-y: auto;
