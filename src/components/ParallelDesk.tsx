@@ -109,6 +109,9 @@ type ModelOption = { id: string; label: string };
 
 // Model ids are taken from the local agent CLIs. Freebuff does not accept a
 // launch-time model, so it is intentionally absent here.
+const AGY_MODEL_LABEL = (id: string) =>
+  MODEL_OPTIONS.antigravity?.find((m) => m.id === id)?.label || id;
+
 const MODEL_OPTIONS: Record<string, ModelOption[]> = {
   opencode: [
     { id: 'opencode/big-pickle', label: 'Big Pickle' },
@@ -3195,8 +3198,14 @@ function LogDrawer({
       alive = false;
     };
   }, [isAgy, agyScreen.model]);
-  const agyModelLabel = agyScreen.model || agyDefault?.model || (isAgy ? 'Agy' : '');
-  const agyEffortLabel = agyScreen.effort || agyDefault?.effort || 'effort';
+  const pickedAgyModel = agent.orcaSessionId
+    ? localStorage.getItem(`agyModel:${agent.orcaSessionId}`)
+    : null;
+  const pickedLabel = pickedAgyModel ? AGY_MODEL_LABEL(pickedAgyModel) : null;
+  const pickedEffort = pickedLabel?.match(/\((\w+)\)\s*$/)?.[1]?.toLowerCase();
+  const agyModelLabel =
+    agyScreen.model || pickedLabel?.replace(/\s*\(\w+\)\s*$/, '') || agyDefault?.model || (isAgy ? 'Agy' : '');
+  const agyEffortLabel = agyScreen.effort || pickedEffort || agyDefault?.effort || 'effort';
   // A chat stays a chat even if Orca also exposes a terminal handle for it.
   const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking = transcript ? transcript.state === 'working' : agent.state === 'working';
@@ -3308,6 +3317,44 @@ function LogDrawer({
       ),
     [agent, displayTail, freebuffSessionEntries, isFreebuff, transcriptEntries],
   );
+  const [agyPickerOpen, setAgyPickerOpen] = useState(false);
+  const [agySwitching, setAgySwitching] = useState(false);
+  // Orca fixes an Agy chat's model at launch, so switching starts a fresh chat
+  // on the same worktree with the new model and carries the handoff brief over.
+  const switchAgyModel = async (modelId: string) => {
+    if (agySwitching) return;
+    setAgySwitching(true);
+    setSendError(null);
+    try {
+      const result = await orcaApi.launch({
+        path: agent.path,
+        prompt: `${handoffBrief}\n\n모델을 바꿔 이어서 진행합니다. 위 맥락을 이어받아 계속해 주세요.`,
+        agent: 'antigravity',
+        count: 1,
+        isolate: false,
+        team: false,
+        workerModel: modelId,
+        coordinatorModel: '',
+      });
+      const launched = result.launches.find((item) => item.ok);
+      if (!launched) throw new Error(result.launches[0]?.error || '모델을 바꾸지 못했어요.');
+      const agents = result.overview?.agents || [];
+      const next =
+        agents.find((item) => launched.sessionId && item.orcaSessionId === launched.sessionId) ||
+        agents
+          .filter((item) => item.kind === 'chat' && item.agent === 'antigravity' && item.path === agent.path)
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+      notify(`${AGY_MODEL_LABEL(modelId)}(으)로 새 채팅을 열었어요`);
+      setAgyPickerOpen(false);
+      const sid = launched.sessionId || next?.orcaSessionId;
+      if (sid) localStorage.setItem(`agyModel:${sid}`, modelId);
+      if (next && next.id !== agent.id) onContinue(next);
+    } catch (cause) {
+      setSendError(cause instanceof Error ? cause.message : '모델을 바꾸지 못했어요.');
+    } finally {
+      setAgySwitching(false);
+    }
+  };
   const freebuffModelLabel =
     freebuffModelOverride || freebuffMeta.model || FREEBUFF_PICKER_MODELS[0].label;
   const freebuffMultiplier =
@@ -4459,6 +4506,32 @@ function LogDrawer({
             onDragLeave={() => setDragActive(false)}
             onDrop={dropFile}
           >
+            {agyPickerOpen && isAgyChat && (
+              <div className="inline-panel desk-agy-model-panel" role="region" aria-label="Agy 모델 선택">
+                <div className="inline-panel-scroll" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  <div className="sheet-content model-sheet">
+                    <div className="sheet-list">
+                      {(MODEL_OPTIONS.antigravity || []).map((model) => (
+                        <button
+                          type="button"
+                          key={model.id}
+                          className={`sheet-row model-row ${agyModelLabel === model.label ? 'selected' : ''}`}
+                          disabled={agySwitching}
+                          onClick={() => void switchAgyModel(model.id)}
+                        >
+                          <span className="model-name">{model.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="desk-freebuff-panel-note">
+                      {agySwitching
+                        ? '새 채팅을 여는 중…'
+                        : '모델은 세션 시작 시 정해져서, 선택하면 같은 워크트리에 맥락을 이어받은 새 채팅이 열립니다.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {attachment && (
               <div className="desk-log-attachment">
                 <FileText size={13} />
@@ -4520,12 +4593,23 @@ function LogDrawer({
                 <span>자동</span>
               </span>
               <div className="tb-center desk-agy-center">
-                <span className="tb-item model">
+                <button
+                  type="button"
+                  className={`tb-item model ${agyPickerOpen ? 'is-open' : ''}`}
+                  onClick={() => isAgyChat && setAgyPickerOpen((open) => !open)}
+                  aria-expanded={agyPickerOpen}
+                >
                   <span>{isAgyChat ? agyModelLabel : displayMeta.label}</span>
-                </span>
-                <span className="tb-item">
+                  {isAgyChat && <ChevronDown size={12} className={`tb-chev ${agyPickerOpen ? 'flip' : ''}`} />}
+                </button>
+                <button
+                  type="button"
+                  className="tb-item"
+                  onClick={() => isAgyChat && setAgyPickerOpen(true)}
+                >
                   <span>{isAgyChat ? agyEffortLabel : 'Orca'}</span>
-                </span>
+                  {isAgyChat && <ChevronDown size={12} className="tb-chev" />}
+                </button>
               </div>
               <span
                 className="tb-item timer"
