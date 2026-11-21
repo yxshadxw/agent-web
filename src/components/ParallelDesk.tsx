@@ -3401,8 +3401,40 @@ function LogDrawer({
     setSendError(null);
     try {
       if (agent.terminalHandle) {
-        const opened = await orcaApi.sendTerminal(agent.terminalHandle, '/model');
+        const handle = agent.terminalHandle;
+        const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+        const opened = await orcaApi.sendTerminal(handle, '/model', {
+          focus: false,
+          waitSubmit: false,
+        });
         if (!opened.ok) throw new Error(opened.error || '/model 명령을 열지 못했어요.');
+        await pause(750);
+        const list = MODEL_OPTIONS[agent.agent] || MODEL_OPTIONS.antigravity || [];
+        const targetIndex = list.findIndex((m) => m.id === modelId);
+        if (targetIndex >= 0) {
+          const snap = await orcaApi.terminal(handle, { screen: true, limit: 400 });
+          const tail = (snap.tail ?? []).join('\n');
+          const targetLabel = AGY_MODEL_LABEL(modelId);
+          // Navigate down to matching row if visible, otherwise select by index
+          const lines = (snap.tail ?? []).filter((line) =>
+            list.some((m) => line.includes(m.label.replace(/\s*\(\w+\)\s*$/, ''))),
+          );
+          const curIdx = lines.findIndex((line) => /[›>●▸]/.test(line));
+          const tgtIdx = lines.findIndex((line) => line.includes(targetLabel.replace(/\s*\(\w+\)\s*$/, '')));
+          if (curIdx >= 0 && tgtIdx >= 0) {
+            const delta = tgtIdx - curIdx;
+            const key = delta >= 0 ? 'down' : 'up';
+            for (let step = 0; step < Math.abs(delta); step += 1) {
+              await orcaApi.sendTerminalKey(handle, key);
+              await pause(200);
+            }
+            await orcaApi.sendTerminalKey(handle, 'enter');
+          } else if (tail) {
+            await orcaApi.sendTerminalKey(handle, 'enter');
+          }
+          await pause(500);
+          void load();
+        }
       }
       if (agent.orcaSessionId) {
         localStorage.setItem(`agyModel:${agent.orcaSessionId}`, modelId);
