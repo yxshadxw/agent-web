@@ -1172,6 +1172,62 @@ async function readFreebuffSession(rawPath, requestedChat) {
   return payload;
 }
 
+const AGY_BRAIN_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'brain');
+
+function agyToolDetail(call) {
+  const a = call?.args || {};
+  const clean = (v) => String(v ?? '').replace(/^"|"$/g, '').replace(/\\"/g, '"');
+  const pick = (...keys) => {
+    for (const k of keys) if (a[k] != null && a[k] !== '') return clean(a[k]);
+    return '';
+  };
+  const name = String(call?.name || '');
+  const detail =
+    pick('CommandLine', 'command', 'Path', 'AbsolutePath', 'TargetFile', 'query', 'Query', 'Url', 'Role', 'Pattern', 'SearchPath') ||
+    clean(JSON.stringify(a)).slice(0, 300);
+  return { tool: name, detail: detail.slice(0, 2000), summary: pick('toolSummary') };
+}
+
+// Orca's Agy transcript only says `execute`. Recover the real commands from the
+// Agy CLI's own transcript for the matching conversation.
+function enrichAgyTools(entries) {
+  try {
+    const toolEntries = entries.filter((e) => e.kind === 'tool');
+    if (!toolEntries.length || !existsSync(AGY_BRAIN_DIR)) return entries;
+    const lastUser = [...entries].reverse().find((e) => e.role === 'user' && e.text)?.text || '';
+    const needle = lastUser.replace(/\[image\]/g, '').trim().slice(0, 80);
+    const candidates = readdirSync(AGY_BRAIN_DIR)
+      .map((id) => join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl'))
+      .filter((f) => existsSync(f))
+      .map((f) => ({ f, m: statSync(f).mtimeMs }))
+      .sort((a, b) => b.m - a.m)
+      .slice(0, 12);
+    for (const { f } of candidates) {
+      const text = readFileSync(f, 'utf8');
+      if (needle && !text.includes(JSON.stringify(needle).slice(1, -1))) continue;
+      const calls = [];
+      for (const line of text.split('\n')) {
+        if (!line.includes('tool_calls')) continue;
+        try {
+          const row = JSON.parse(line);
+          for (const call of row.tool_calls || []) calls.push(agyToolDetail(call));
+        } catch { /* skip */ }
+      }
+      if (!calls.length) continue;
+      const tail = calls.slice(-toolEntries.length);
+      const offset = toolEntries.length - tail.length;
+      let i = 0;
+      return entries.map((e) => {
+        if (e.kind !== 'tool') return e;
+        const c = tail[i - offset >= 0 ? i - offset : 0];
+        const idx = i++;
+        return idx >= offset && c ? { ...e, detail: c.detail, label: c.summary || '', tool: c.tool } : e;
+      });
+    }
+  } catch { /* fall back to plain entries */ }
+  return entries;
+}
+
 async function readTranscript(sessionId) {
   const id = typeof sessionId === 'string' ? sessionId.trim() : '';
   if (!/^[a-f0-9-]{20,64}$/i.test(id)) {
@@ -1189,7 +1245,12 @@ async function readTranscript(sessionId) {
     agent: data?.agent || null,
     source: data?.source || 'transcript',
     state: data?.state || null,
-    entries: Array.isArray(data?.entries) ? data.entries : [],
+    entries:
+      data?.agent === 'antigravity' && Array.isArray(data?.entries)
+        ? enrichAgyTools(data.entries)
+        : Array.isArray(data?.entries)
+          ? data.entries
+          : [],
     limited: Boolean(data?.limited),
     fetchedAt: new Date().toISOString(),
   };

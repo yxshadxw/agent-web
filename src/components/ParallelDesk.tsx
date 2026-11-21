@@ -2663,7 +2663,7 @@ function agyToolDisplay(name: string) {
 }
 
 function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
-  const meta = agyToolDisplay(tool.name || '');
+  const meta = agyToolDisplay(tool.tool || tool.name || '');
   const state = String(tool.state || 'completed').toLowerCase();
   const running = state === 'running' || state === 'pending';
   const failed = state === 'failed' || state === 'error';
@@ -2686,13 +2686,15 @@ function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
           <Icon size={14} />
         </span>
         <span className="tool-kind">{meta.label}</span>
-        <span className="tool-name">{tool.name || meta.label}</span>
+        <span className="tool-name">
+          {(tool.detail || tool.label || tool.name || meta.label).split('\n')[0]}
+        </span>
         <span className="tool-time">{label}</span>
         <ChevronDown size={14} className="tool-chev" />
       </summary>
       <div className="tool-detail">
-        <div className="tool-detail-label">ORCA TOOL</div>
-        <pre className="tool-args">{`${tool.name || meta.label}\nstate: ${state}`}</pre>
+        <div className="tool-detail-label">{tool.tool || 'ORCA TOOL'}</div>
+        <pre className="tool-args">{tool.detail || `${tool.name || meta.label}\nstate: ${state}`}</pre>
       </div>
     </details>
   );
@@ -3628,7 +3630,14 @@ function LogDrawer({
     void uploadFile(file);
   };
 
-  const dropFile = (event: DragEvent<HTMLDivElement>) => {
+  const pasteFiles = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = Array.from(event.clipboardData?.files || [])[0];
+    if (!file) return;
+    event.preventDefault();
+    void uploadFile(file);
+  };
+
+  const dropFile = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDragActive(false);
     const file = event.dataTransfer.files?.[0];
@@ -4440,16 +4449,47 @@ function LogDrawer({
           </form>
         )}
         {isChat && (
-          <form className="desk-log-compose desk-agy-compose" onSubmit={sendReply}>
+          <form
+            className={`desk-log-compose desk-agy-compose ${dragActive ? 'is-dragging' : ''}`}
+            onSubmit={sendReply}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={dropFile}
+          >
+            {attachment && (
+              <div className="desk-log-attachment">
+                <FileText size={13} />
+                <div>
+                  <strong>{attachment.name}</strong>
+                  <code>{attachment.path}</code>
+                </div>
+                <span>{Math.max(1, Math.round(attachment.size / 1024)).toLocaleString('ko-KR')}KB</span>
+                <button type="button" onClick={() => setAttachment(null)} aria-label="첨부 제거">
+                  <X size={13} />
+                </button>
+              </div>
+            )}
             <div className="composer">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="desk-file-input"
+                onChange={(event) => void attachFile(event)}
+                tabIndex={-1}
+                aria-hidden="true"
+              />
               <button
                 type="button"
                 className="plus-btn"
-                title="파일 첨부는 Freebuff에서 지원합니다"
-                aria-label="파일 첨부 안내"
-                onClick={() => setSendError('파일 첨부는 Freebuff에서 지원합니다.')}
+                title="파일 업로드 · 클릭하거나 끌어다 놓기·붙여넣기 (최대 20MB)"
+                aria-label="파일 업로드"
+                disabled={attaching || sending}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <Plus size={19} />
+                {attaching ? <Loader2 size={17} className="spin" /> : <Plus size={19} />}
               </button>
               <textarea
                 value={reply}
@@ -4462,12 +4502,13 @@ function LogDrawer({
                 }}
                 placeholder={`${isAgyChat ? 'Agy' : displayMeta.label}에게 메시지를 입력하세요`}
                 rows={1}
+                onPaste={pasteFiles}
                 aria-label="에이전트에 메시지 입력"
               />
               <button
                 type="submit"
-                className={`send-btn ${reply.trim() ? 'ready' : ''}`}
-                disabled={!reply.trim() || sending || (!agent.terminalHandle && !agent.id)}
+                className={`send-btn ${reply.trim() || attachment ? 'ready' : ''}`}
+                disabled={(!reply.trim() && !attachment) || sending || (!agent.terminalHandle && !agent.id)}
                 aria-label={sent ? '전달됨' : '보내기'}
               >
                 {sending ? <Loader2 size={15} className="spin" /> : <ArrowUp size={17} />}
