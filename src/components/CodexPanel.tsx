@@ -29,6 +29,7 @@ import type { AgentProvider } from '../lib/api';
 import { switchEngine, type AgentEngine } from '../lib/engine';
 import { BrandGlyph } from './Brand';
 import { AutoList } from './Sheets';
+import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import { SelectMenu } from './SelectMenu';
 
 type CodexTool = {
@@ -183,6 +184,7 @@ function CodexThinking({ text, busy = false }: { text: string; busy?: boolean })
 }
 
 function CodexToolRow({ tool }: { tool: CodexTool }) {
+  const [open, setOpen] = useState(false);
   const meta = codexToolDisplay(tool);
   const state = String(tool.status || 'completed').toLowerCase();
   const running = state.includes('progress') || state === 'running' || state === 'pending';
@@ -190,10 +192,23 @@ function CodexToolRow({ tool }: { tool: CodexTool }) {
   const label = running ? '실행 중' : failed ? '실패' : '완료';
   const Icon = meta.Icon;
   const command = tool.command || tool.name || tool.type;
+  const diffText = hasDiffSignal(tool.output) ? tool.output : hasDiffSignal(command) ? command : '';
 
   return (
-    <details className={`tool real codex-agy-tool ${failed ? 'failed' : ''}`} open={failed || undefined}>
-      <summary className="tool-main">
+    <div className={`tool real codex-agy-tool ${open || failed ? 'open' : ''} ${failed ? 'failed' : ''}`}>
+      <div
+        className="tool-main"
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        aria-expanded={open || failed}
+      >
         <span className={`tool-status ${running ? 'running' : failed ? 'error' : 'done'}`}>
           {running ? (
             <Loader2 size={13} className="spin" />
@@ -206,22 +221,25 @@ function CodexToolRow({ tool }: { tool: CodexTool }) {
         <span className={`tool-ico kind-${meta.kind}`}>
           <Icon size={14} />
         </span>
-        <span className="tool-kind">{meta.label}</span>
+        <span className="tool-kind">{meta.kind}</span>
         <span className="tool-name" title={command}>{command}</span>
         <span className="tool-time">{label}</span>
-        <ChevronDown size={14} className="tool-chev" />
-      </summary>
-      <div className="tool-detail">
-        <div className="tool-detail-label">{tool.type || 'CODEX TOOL'}</div>
-        <pre className="tool-args">{command}</pre>
-        {tool.output && (
-          <>
-            <div className="tool-detail-label">OUTPUT</div>
-            <pre className="tool-args tool-output">{tool.output}</pre>
-          </>
-        )}
+        <ChevronDown size={14} className={`tool-chev ${open || failed ? 'open' : ''}`} />
       </div>
-    </details>
+      {(open || failed) && (
+        <div className="tool-detail">
+          {diffText && <ToolDiff rawDiff={diffText} fileName={command} />}
+          <div className="tool-detail-label">입력</div>
+          <pre className="tool-args">{command}</pre>
+          {tool.output && (
+            <>
+              <div className="tool-detail-label">출력</div>
+              <pre className="tool-args tool-output">{tool.output}</pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

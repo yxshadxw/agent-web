@@ -7738,3 +7738,47 @@ a {
     max-width: min(980px, 88vw);
   }
 }
+
+/* Unified inline diff viewer across Agy, Codex, Claude, and Parallel Desk */
+.tool-diff-wrap {
+  margin-bottom: 8px;
+}
+
+.tool-diff {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #0c0c0e;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.48;
+  overflow-x: auto;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.diff-line {
+  white-space: pre;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.diff-line.diff-add {
+  background: rgba(71, 212, 134, 0.13);
+  color: #6ee7a4;
+}
+
+.diff-line.diff-del {
+  background: rgba(255, 111, 97, 0.13);
+  color: #ff948a;
+}
+
+.diff-line.diff-hunk {
+  color: #7eb6ff;
+  background: rgba(90, 162, 245, 0.08);
+}
+
+.diff-line.diff-ctx {
+  color: var(--muted);
+}

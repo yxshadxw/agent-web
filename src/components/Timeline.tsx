@@ -34,6 +34,7 @@ import type { AssistantMessageInfo, MessageWithParts, PermissionRequest } from '
 import { engineLabel, getEngine } from '../lib/engine';
 import { fmtDuration, formatTokens, timeLabel, type PinnedFile } from '../data';
 import { BrandGlyph } from './Brand';
+import { ToolDiff, hasDiffSignal } from './ToolDiff';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -583,6 +584,20 @@ function ToolRow({
       </div>
       {open && (
         <div className="tool-detail">
+          {kind === 'write' && (() => {
+            const inp = (state.input || {}) as Record<string, unknown>;
+            const oldStr = typeof inp.oldString === 'string' ? inp.oldString : typeof inp.old_string === 'string' ? inp.old_string : undefined;
+            const newStr = typeof inp.newString === 'string' ? inp.newString : typeof inp.new_string === 'string' ? inp.new_string : undefined;
+            const raw = hasDiffSignal(outputLimited) ? outputLimited : typeof inp.patch === 'string' ? inp.patch : undefined;
+            return (
+              <ToolDiff
+                oldText={oldStr}
+                newText={newStr}
+                rawDiff={raw}
+                fileName={filePath || undefined}
+              />
+            );
+          })()}
           <div className="tool-detail-label">입력</div>
           <pre className="tool-args">{inputText}</pre>
           {output && (

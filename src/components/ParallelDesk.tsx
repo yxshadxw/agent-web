@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { useAgyQuota } from '../hooks/useQuota';
 import { QuotaSection } from './Quota';
+import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import {
   orcaApi,
   type FreebuffSessionPayload,
@@ -2808,16 +2809,31 @@ function agyToolDisplay(name: string) {
 }
 
 function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
+  const [open, setOpen] = useState(false);
   const meta = agyToolDisplay(tool.tool || tool.name || '');
   const state = String(tool.state || 'completed').toLowerCase();
   const running = state === 'running' || state === 'pending';
   const failed = state === 'failed' || state === 'error';
   const label = running ? '실행 중' : failed ? '실패' : '완료';
   const Icon = meta.Icon;
+  const detailText = tool.detail || tool.text || '';
+  const summaryText = (tool.detail || tool.label || tool.name || meta.label).split('\n')[0];
 
   return (
-    <details className={`tool real desk-agy-tool ${failed ? 'failed' : ''}`}>
-      <summary className="tool-main">
+    <div className={`tool real desk-agy-tool ${open || failed ? 'open' : ''} ${failed ? 'failed' : ''}`}>
+      <div
+        className="tool-main"
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        aria-expanded={open || failed}
+      >
         <span className={`tool-status ${running ? 'running' : failed ? 'error' : 'done'}`}>
           {running ? (
             <Loader2 size={13} className="spin" />
@@ -2830,18 +2846,19 @@ function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
         <span className={`tool-ico kind-${meta.kind}`}>
           <Icon size={14} />
         </span>
-        <span className="tool-kind">{meta.label}</span>
-        <span className="tool-name">
-          {(tool.detail || tool.label || tool.name || meta.label).split('\n')[0]}
-        </span>
+        <span className="tool-kind">{meta.kind}</span>
+        <span className="tool-name">{summaryText}</span>
         <span className="tool-time">{label}</span>
-        <ChevronDown size={14} className="tool-chev" />
-      </summary>
-      <div className="tool-detail">
-        <div className="tool-detail-label">{tool.tool || 'ORCA TOOL'}</div>
-        <pre className="tool-args">{tool.detail || `${tool.name || meta.label}\nstate: ${state}`}</pre>
+        <ChevronDown size={14} className={`tool-chev ${open || failed ? 'open' : ''}`} />
       </div>
-    </details>
+      {(open || failed) && (
+        <div className="tool-detail">
+          {hasDiffSignal(detailText) && <ToolDiff rawDiff={detailText} fileName={summaryText} />}
+          <div className="tool-detail-label">입력</div>
+          <pre className="tool-args">{detailText || `${tool.name || meta.label}\nstate: ${state}`}</pre>
+        </div>
+      )}
+    </div>
   );
 }
 
