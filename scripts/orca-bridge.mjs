@@ -81,7 +81,7 @@ const COMMON_RULES = `[Agent Desk 공통 지시 — 반드시 준수]
 - 작업이 끝나면 변경 사항과 검증 결과를 짧게 요약하세요.`;
 
 function agentPrompt(prompt) {
-  return `${COMMON_RULES}\n\n[작업]\n${prompt}`;
+  return `${COMMON_RULES}\n\n[단독 실행]\n이 세션은 단독 실행이므로 다른 코디네이터에게 보고하지 말고 사용자에게 직접 결과를 보고하세요.\n\n[작업]\n${prompt}`;
 }
 
 function json(res, status, body) {
@@ -548,13 +548,23 @@ async function githubInfo(worktree) {
   };
 }
 
-function findCoordinator(overview) {
-  return overview.agents.find((agent) => agent.role === 'coordinator') || null;
+function findCoordinator(overview, worktree) {
+  const coordinators = overview.agents.filter((agent) => agent.role === 'coordinator');
+  if (!worktree) return coordinators[0] || null;
+  return (
+    coordinators.find(
+      (agent) =>
+        (worktree.id && agent.worktreeId === worktree.id) ||
+        (worktree.path && agent.path === worktree.path),
+    ) ||
+    coordinators.find((agent) => worktree.repo && agent.repo === worktree.repo) ||
+    null
+  );
 }
 
 async function notifyConflict(worktree, pushError) {
   const overview = await getOverview(true);
-  const coordinator = findCoordinator(overview);
+  const coordinator = findCoordinator(overview, worktree);
   if (!coordinator) {
     return { notified: false, reason: '등록된 코디네이터를 찾지 못했습니다.' };
   }
@@ -1824,10 +1834,45 @@ async function launchAgents(body) {
   // In team mode the app opens only one coordinator session. The worker
   // headcount is passed in the coordinator prompt; the coordinator opens and
   // manages any worker sessions it actually needs.
+  let coordinator = null;
+  let coordinatorTarget = '';
+  if (team) {
+    const workerSurface = launchSurface(agent);
+    const workerTarget =
+      workerSurface === 'chat' ? 'orca_session_id:<세션 ID>' : '<terminal handle>';
+    const coordinatorPrompt = `[코디네이터 역할]\n${COMMON_RULES}\n\n너는 ${worktree.path} 워크트리의 최종 코디네이터다. 다른 코디네이터에게 보고하지 말고, 워커 취합 후 사용자에게 직접 결과를 보고해. 앱이 같은 워크트리에 워커 ${count}명을 함께 띄운다. 작업을 ${count}명이 나눠 맡을 수 있는 범위로 설계하고, 각 범위의 담당·완료 조건·검증 방법을 정한 뒤 실행과 취합을 지휘해.\n워커 세션은 \`orca agent list --worktree path:${worktree.path} --json\`으로 확인하고, ${workerSurface === 'chat' ? '`orca_session_id:<id>` 형식으로' : 'terminal handle을'} \`orca orchestration send --to ${workerTarget} --subject \"...\" --body \"...\" --type status --json\`의 대상으로 넣어 지휘해. 직접 파일을 수정하기보다 분배·검증·취합에 집중해.\n\n[전체 작업]\n${prompt}`;
+    try {
+      coordinator = await launchOne({
+        worktree,
+        agent,
+        prompt: coordinatorPrompt,
+        isolate,
+        model: coordinatorModel,
+        index: 0,
+        role: 'coordinator',
+      });
+      if (coordinator?.ok) {
+        coordinatorTarget = coordinator.sessionId
+          ? `orca_session_id:${coordinator.sessionId}`
+          : coordinator.handle || '';
+      }
+    } catch (error) {
+      coordinator = {
+        ok: false,
+        index: 0,
+        role: 'coordinator',
+        agent,
+        path: worktree.path,
+        isolate,
+        error: errorMessage(error),
+      };
+    }
+  }
+
   const workerPrompt = blank
     ? ''
     : team
-      ? `[워커 역할]\n${COMMON_RULES}\n\n코디네이터의 지시를 기다리며 대기해. 직접 작업을 시작하지 말고 코디네이터가 orca orchestration send로 지시하면 그때 진행해.`
+      ? `[워커 역할]\n${COMMON_RULES}\n\n${coordinatorTarget ? `이 팀(${worktree.path})의 코디네이터는 ${coordinatorTarget} 이다. 보고·완료·막힘은 반드시 \`orca orchestration send --to ${coordinatorTarget} --subject "..." --body "..." --type status --json\`으로만 보내고, 다른 세션이나 다른 워크트리의 코디네이터에게 보내지 마.` : `같은 워크트리(${worktree.path})의 코디네이터에게만 보고하고 다른 워크트리의 코디네이터에게 보내지 마.`} 직접 작업을 시작하지 말고 코디네이터가 지시하면 그때 진행해.`
       : agentPrompt(prompt);
   const workerLaunches = count;
   const launches = [];
@@ -1858,35 +1903,6 @@ async function launchAgents(body) {
 
     if (index < count - 1) {
       await new Promise((resolveSleep) => setTimeout(resolveSleep, 350));
-    }
-  }
-
-  let coordinator = null;
-  if (team) {
-    const workerSurface = launchSurface(agent);
-    const workerTarget =
-      workerSurface === 'chat' ? 'orca_session_id:<세션 ID>' : '<terminal handle>';
-    const coordinatorPrompt = `[코디네이터 역할]\n${COMMON_RULES}\n\n너는 이 팀의 최종 코디네이터다. 다른 코디네이터에게 보고하지 말고, 워커 취합 후 사용자에게 직접 결과를 보고해. 앱은 워커 세션을 미리 열지 않았다. 워커 정원은 ${count}명이다. 작업을 ${count}명이 나눠 맡을 수 있는 범위로 설계하고, 각 범위의 담당·완료 조건·검증 방법을 정한 뒤 실행과 취합을 지휘해.\n워커 세션이 필요하면 현재 워크트리에서 \`orca agent launch --agent ${agent} --worktree path:$(pwd) --prompt \"...\" --surface ${workerSurface} --json\`로 직접 띄워. ${workerSurface === 'chat' ? '채팅 세션이면 `orca agent list --worktree path:$(pwd) --json`에서 그 세션의 orcaSessionId를 확인해 `orca_session_id:<id>` 형식으로' : '터미널 세션이면 반환된 terminal handle을'} \`orca orchestration send --to ${workerTarget} --subject \"...\" --body \"...\" --type status --json\`의 대상으로 넣어 지휘해. 워커를 띄울 때는 프롬프트 첫 줄에 반드시 [워커 역할] 표식을 넣어. 직접 파일을 수정하기보다 분배·검증·취합에 집중해.\n\n[전체 작업]\n${prompt}`;
-    try {
-      coordinator = await launchOne({
-        worktree,
-        agent,
-        prompt: coordinatorPrompt,
-        isolate,
-        model: coordinatorModel,
-        index: 0,
-        role: 'coordinator',
-      });
-    } catch (error) {
-      coordinator = {
-        ok: false,
-        index: 0,
-        role: 'coordinator',
-        agent,
-        path: worktree.path,
-        isolate,
-        error: errorMessage(error),
-      };
     }
   }
 
