@@ -365,11 +365,11 @@ function ReasoningBlock({
   busy: boolean;
   defaultOpen: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(defaultOpen || busy);
 
   useEffect(() => {
-    setOpen(defaultOpen);
-  }, [defaultOpen]);
+    if (defaultOpen || busy) setOpen(true);
+  }, [defaultOpen, busy]);
   const start = Math.min(...parts.map((part) => part.time.start));
   const openPart = parts.find((part) => !part.time.end);
   const [now, setNow] = useState(Date.now());

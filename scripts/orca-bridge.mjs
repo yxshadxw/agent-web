@@ -5,7 +5,7 @@
  * never exposes Orca credentials; it only shells out to the local `orca` CLI
  * and returns the normalized fields the desk needs.
  */
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -1399,18 +1399,53 @@ function agyToolDetail(call) {
     return '';
   };
   const name = String(call?.name || '');
+  const filePath = pick('Path', 'AbsolutePath', 'TargetFile', 'filePath', 'path');
   const detail =
     pick('CommandLine', 'command', 'Path', 'AbsolutePath', 'TargetFile', 'query', 'Query', 'Url', 'Role', 'Pattern', 'SearchPath') ||
     clean(JSON.stringify(a)).slice(0, 300);
-  return { tool: name, detail: detail.slice(0, 2000), summary: pick('toolSummary') };
+
+  let oldText = pick('Target', 'TargetContent', 'oldString', 'old_string');
+  let newText = pick('Replacement', 'ReplacementContent', 'newString', 'new_string');
+  let diff = '';
+
+  if (/write_file|write_to_file|edit_file|replace_file/i.test(name) && filePath) {
+    if (!oldText && !newText) {
+      const content = pick('Content', 'CodeContent', 'content');
+      if (existsSync(filePath)) {
+        try {
+          const out = execFileSync('git', ['diff', 'HEAD', '--', filePath], {
+            cwd: dirname(filePath),
+            encoding: 'utf8',
+            timeout: 500,
+          }).trim();
+          if (out) diff = out.slice(0, 12_000);
+        } catch {
+          // ignore non-git or missing HEAD
+        }
+      }
+      if (!diff && content) {
+        oldText = '';
+        newText = content;
+      }
+    }
+  }
+
+  return {
+    tool: name,
+    detail: detail.slice(0, 2000),
+    summary: pick('toolSummary'),
+    oldText: oldText ? oldText.slice(0, 6000) : '',
+    newText: newText ? newText.slice(0, 6000) : '',
+    diff,
+  };
 }
 
 // Orca's Agy transcript only says `execute`. Recover the real commands from the
 // Agy CLI's own transcript for the matching conversation.
-function enrichAgyTools(entries) {
+function enrichAgyTools(entries, state = '') {
   try {
     const toolEntries = entries.filter((e) => e.kind === 'tool');
-    if (!toolEntries.length || !existsSync(AGY_BRAIN_DIR)) return entries;
+    if (!existsSync(AGY_BRAIN_DIR)) return entries;
     const lastUser = [...entries].reverse().find((e) => e.role === 'user' && e.text)?.text || '';
     const needle = lastUser.replace(/\[image\]/g, '').trim().slice(0, 80);
     const candidates = readdirSync(AGY_BRAIN_DIR)
@@ -1424,10 +1459,12 @@ function enrichAgyTools(entries) {
       if (needle && !text.includes(JSON.stringify(needle).slice(1, -1))) continue;
       const calls = [];
       const plain = [];
+      let latestThinking = '';
       for (const line of text.split('\n')) {
         if (line.includes('"PLANNER_RESPONSE"') && line.includes('"thinking"')) {
           try {
             const r = JSON.parse(line);
+            if (r.thinking?.trim()) latestThinking = r.thinking.trim();
             if (r.thinking?.trim() && r.content?.trim() && !(r.tool_calls || []).length) {
               plain.push({ key: r.content.trim().slice(0, 40), thinking: r.thinking.trim() });
             }
@@ -1437,6 +1474,7 @@ function enrichAgyTools(entries) {
         try {
           const row = JSON.parse(line);
           const thinking = typeof row.thinking === 'string' ? row.thinking.trim() : '';
+          if (thinking) latestThinking = thinking;
           (row.tool_calls || []).forEach((call, n) => {
             const d = agyToolDetail(call);
             if (n === 0 && thinking) d.thinking = thinking;
@@ -1444,7 +1482,7 @@ function enrichAgyTools(entries) {
           });
         } catch { /* skip */ }
       }
-      if (!calls.length) continue;
+      if (!calls.length && !latestThinking) continue;
       const tail = calls.slice(-toolEntries.length);
       const offset = toolEntries.length - tail.length;
       let i = 0;
@@ -1455,16 +1493,34 @@ function enrichAgyTools(entries) {
           const hit = plain.find((p) => e.text.trim().startsWith(p.key));
           return hit ? [{ kind: 'thinking', role: 'assistant', text: hit.thinking.slice(0, 20000) }, e] : [e];
         });
-      return withPlain(entries.flatMap((e) => {
+      const enrichedList = withPlain(entries.flatMap((e) => {
         if (e.kind !== 'tool') return [e];
         const c = tail[i - offset >= 0 ? i - offset : 0];
         const idx = i++;
         if (idx < offset || !c) return [e];
-        const enriched = { ...e, detail: c.detail, label: c.summary || '', tool: c.tool };
+        const enriched = {
+          ...e,
+          detail: c.detail,
+          label: c.summary || '',
+          tool: c.tool,
+          ...(c.oldText ? { oldText: c.oldText } : {}),
+          ...(c.newText ? { newText: c.newText } : {}),
+          ...(c.diff ? { diff: c.diff } : {}),
+        };
         return c.thinking
           ? [{ kind: 'thinking', role: 'assistant', text: c.thinking.slice(0, 20000) }, enriched]
           : [enriched];
       }));
+      if (state === 'working' && latestThinking) {
+        const lastEntry = enrichedList[enrichedList.length - 1];
+        if (!lastEntry || (lastEntry.kind !== 'thinking' && lastEntry.text !== latestThinking)) {
+          const alreadyHas = enrichedList.some((e) => e.kind === 'thinking' && e.text === latestThinking.slice(0, 20000));
+          if (!alreadyHas) {
+            enrichedList.push({ kind: 'thinking', role: 'assistant', text: latestThinking.slice(0, 20000) });
+          }
+        }
+      }
+      return enrichedList;
     }
   } catch { /* fall back to plain entries */ }
   return entries;
@@ -1489,7 +1545,7 @@ async function readTranscript(sessionId) {
     state: data?.state || null,
     entries:
       data?.agent === 'antigravity' && Array.isArray(data?.entries)
-        ? enrichAgyTools(data.entries)
+        ? enrichAgyTools(data.entries, data?.state || '')
         : Array.isArray(data?.entries)
           ? data.entries
           : [],

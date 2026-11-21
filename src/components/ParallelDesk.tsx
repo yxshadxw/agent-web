@@ -2853,7 +2853,14 @@ function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
       </div>
       {(open || failed) && (
         <div className="tool-detail">
-          {hasDiffSignal(detailText) && <ToolDiff rawDiff={detailText} fileName={summaryText} />}
+          {(tool.diff || hasDiffSignal(detailText) || (typeof tool.newText === 'string' && tool.newText.length > 0)) && (
+            <ToolDiff
+              oldText={tool.oldText}
+              newText={tool.newText}
+              rawDiff={tool.diff || (hasDiffSignal(detailText) ? detailText : undefined)}
+              fileName={summaryText}
+            />
+          )}
           <div className="tool-detail-label">입력</div>
           <pre className="tool-args">{detailText || `${tool.name || meta.label}\nstate: ${state}`}</pre>
         </div>
@@ -3714,7 +3721,7 @@ function LogDrawer({
           .then(setTranscript)
           .catch(() => undefined);
       }
-    }, 3000);
+    }, 900);
     return () => window.clearInterval(timer);
   }, [agent.orcaSessionId]);
 

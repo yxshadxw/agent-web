@@ -86,6 +86,9 @@ export type TranscriptEntry = {
   detail?: string;
   label?: string;
   tool?: string;
+  oldText?: string;
+  newText?: string;
+  diff?: string;
 };
 
 export type TranscriptPayload = {
