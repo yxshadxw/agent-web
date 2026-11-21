@@ -277,22 +277,12 @@ export default function App() {
   const remainingLabel = useMemo(() => {
     const candidates = (quotaState.quota?.groups || [])
       .flatMap((group) => group.buckets)
-      .filter(
-        (bucket) =>
-          !bucket.disabled && typeof bucket.remaining === 'number' && bucket.resetAt,
-      );
+      .filter((bucket) => !bucket.disabled && typeof bucket.remaining === 'number');
     if (!candidates.length) return null;
     const limiting = candidates.reduce((left, right) =>
       (left.remaining ?? 101) <= (right.remaining ?? 101) ? left : right,
     );
-    const remainingMs = new Date(limiting.resetAt as string).getTime() - Date.now();
-    if (!Number.isFinite(remainingMs)) return null;
-    if (remainingMs <= 0) return '곧 초기화';
-    const minutes = Math.max(1, Math.round(remainingMs / 60_000));
-    if (minutes < 60) return `${minutes}분`;
-    const hours = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    return rest ? `${hours}시간 ${rest}분` : `${hours}시간`;
+    return `${Math.round(limiting.remaining as number)}%`;
   }, [quotaState.quota]);
   const usageTokens = sessionTokens(agent.messages, session);
   const usageCost = sessionCost(agent.messages, session);

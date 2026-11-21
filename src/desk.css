@@ -7727,3 +7727,14 @@ a {
 .codex-panel .tb-item.timer .timer-ring {
   animation: none;
 }
+
+/* Global consistency across single-agent desktop and Parallel Desk */
+.tb-item.timer .timer-ring {
+  animation: none !important;
+}
+
+@media (min-width: 981px) {
+  .phone {
+    max-width: min(980px, 88vw);
+  }
+}
