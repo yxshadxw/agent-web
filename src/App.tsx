@@ -38,12 +38,10 @@ const DESK_OPEN_KEY = 'agent-web:desk-open:v1';
 function loadDeskOpen(): boolean {
   try {
     const stored = localStorage.getItem(DESK_OPEN_KEY);
-    if (stored === '1' || stored === '0') return stored === '1';
-    // Migrate the old session-only value once. Full app restarts lose
-    // sessionStorage, which made the desk forget the open session.
-    return sessionStorage.getItem(DESK_OPEN_KEY) === '1';
+    if (stored === '0') return false;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
