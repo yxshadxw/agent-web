@@ -7340,3 +7340,9 @@
 .desk-handoff-actions .desk-btn {
   height: 32px;
 }
+
+/* The handoff sheet is launched from the log drawer (z-index: 120). Keep the
+   sheet above that drawer; the shared sheet layer is otherwise below it. */
+.sheet-layer.desk-handoff-sheet {
+  z-index: 200;
+}

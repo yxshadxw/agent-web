@@ -2912,7 +2912,7 @@ function HandoffSheet({
   };
 
   return (
-    <Sheet open onClose={onClose} label="에이전트 인수인계">
+    <Sheet open onClose={onClose} label="에이전트 인수인계" className="desk-handoff-sheet">
       <div className="sheet-content desk-handoff">
         <div className="sheet-head">
           <span className="sheet-title">에이전트 인수인계</span>
@@ -3032,6 +3032,8 @@ function LogDrawer({
   const [freebuffTimeLeft, setFreebuffTimeLeft] = useState<string | null>(null);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const loadInFlightRef = useRef(false);
+  const loadStartedAtRef = useRef(0);
+  const loadTokenRef = useRef(0);
   const [freebuffModelOverride, setFreebuffModelOverride] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -3237,8 +3239,13 @@ function LogDrawer({
   };
 
   const load = useCallback(async () => {
-    if (loadInFlightRef.current) return;
+    const now = Date.now();
+    // A terminal read can occasionally hang on a stale host connection. Do not
+    // let that one request disable polling forever: take over after 6 seconds.
+    if (loadInFlightRef.current && now - loadStartedAtRef.current < 6_000) return;
     loadInFlightRef.current = true;
+    loadStartedAtRef.current = now;
+    const token = ++loadTokenRef.current;
     if (!agent.terminalHandle && !agent.orcaSessionId) {
       setError('이 에이전트의 터미널 핸들을 찾지 못했습니다.');
       setLoading(false);
@@ -3282,8 +3289,10 @@ function LogDrawer({
         }
       }
     } finally {
-      setLoading(false);
-      loadInFlightRef.current = false;
+      if (token === loadTokenRef.current) {
+        setLoading(false);
+        loadInFlightRef.current = false;
+      }
     }
   }, [agent.path, agent.terminalHandle, agent.orcaSessionId, isFreebuff]);
 
@@ -3295,7 +3304,14 @@ function LogDrawer({
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load();
     }, 500);
-    return () => window.clearInterval(timer);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [load]);
 
   /* keep the transcript fresh even when the terminal read is slow */
@@ -4136,7 +4152,7 @@ function LogDrawer({
                           ) : (
                             <>
                               <AlertTriangle size={11} />
-                              남은 시간을 읽지 못했어요
+                              남은 시간을 읽지 못했어요 · 작업 중엔 숨겨져요
                             </>
                           )}
                         </div>
@@ -4292,7 +4308,11 @@ function LogDrawer({
                 className={`tb-item timer ${isThinking ? 'busy' : 'idle'} ${freebuffPanel === 'usage' ? 'is-open' : ''} ${freebuffTimeLabel ? '' : 'time-error'}`}
                 onClick={() => toggleFreebuffPanel('usage')}
                 aria-label={freebuffTimeLabel ? `Freebuff 남은 시간 ${freebuffTimeLabel}` : 'Freebuff 남은 시간 확인 불가'}
-                title={freebuffTimeLabel ? `남은 시간 ${freebuffTimeLabel}` : '남은 시간을 읽지 못했어요'}
+                title={
+                  freebuffTimeLabel
+                    ? `남은 시간 ${freebuffTimeLabel}`
+                    : 'Freebuff가 작업 중에는 남은 시간 줄을 숨겨요. 끝나면 다시 표시돼요.'
+                }
                 aria-expanded={freebuffPanel === 'usage'}
               >
                 <span

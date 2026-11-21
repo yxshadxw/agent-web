@@ -7,9 +7,10 @@ type Props = {
   onClose: () => void;
   children: ReactNode;
   label: string;
+  className?: string;
 };
 
-export function Sheet({ open, onClose, children, label }: Props) {
+export function Sheet({ open, onClose, children, label, className }: Props) {
   const [mounted, setMounted] = useState(open);
   const panelRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -65,7 +66,7 @@ export function Sheet({ open, onClose, children, label }: Props) {
   if (!mounted) return null;
 
   return createPortal(
-    <div className="sheet-layer">
+    <div className={`sheet-layer ${className || ''}`}>
       <div className="sheet-backdrop" ref={backdropRef} onClick={onClose} />
       <div className="sheet-wrap">
         <div className="sheet-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={label}>
