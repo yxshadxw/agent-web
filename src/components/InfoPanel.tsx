@@ -369,16 +369,18 @@ function InfoTabContent({
 
   return (
     <div className="info-stack">
-      <section className="ctx-block anim-row">
-        <div className="info-label">컨텍스트</div>
-        <div className="bar ctx-main-bar">
-          <span className="bar-fill" style={{ width: `${Math.max(0.5, pct)}%` }} />
-        </div>
-        <div className="ctx-big">{pct < 10 ? pct.toFixed(1) : Math.round(pct)}%</div>
-        <div className="ctx-sub">
-          {formatTokens(used)} / {formatTokens(limit)} 토큰
-        </div>
-      </section>
+      {limit > 0 && (
+        <section className="ctx-block anim-row">
+          <div className="info-label">컨텍스트</div>
+          <div className="bar ctx-main-bar">
+            <span className="bar-fill" style={{ width: `${Math.max(0.5, pct)}%` }} />
+          </div>
+          <div className="ctx-big">{pct < 10 ? pct.toFixed(1) : Math.round(pct)}%</div>
+          <div className="ctx-sub">
+            {formatTokens(used)} / {formatTokens(limit)} 토큰
+          </div>
+        </section>
+      )}
 
       <QuotaSection
         quota={quota}

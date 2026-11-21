@@ -62,7 +62,6 @@ import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import {
   orcaApi,
   type FreebuffSessionPayload,
-  type FreebuffUsage,
   type GithubInfo,
   type GithubWorkflow,
   type InstructionsInfo,
@@ -349,7 +348,6 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [sideOpen, setSideOpen] = useState(false);
-  const [creditsOpen, setCreditsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [logAgent, setLogAgent] = useState<OrcaAgent | null>(null);
   const [openingTerminal, setOpeningTerminal] = useState(false);
@@ -362,7 +360,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const [deskWorktreeDiff, setDeskWorktreeDiff] = useState<WorktreeDiffPayload | null>(null);
   const [deskPins, setDeskPins] = useState<PinnedFile[]>([]);
   const [deskCodexQuota, setDeskCodexQuota] = useState<CodexQuotaSnapshot | null>(null);
-  const { quota: deskAgyQuota, loading: deskQuotaLoading, refresh: refreshDeskQuota } = useAgyQuota(deskInfoOpen);
+  const { quota: deskAgyQuota, loading: deskQuotaLoading, refresh: refreshDeskQuota } = useAgyQuota(true);
   const toggleCoord = (id: string) =>
     setExpandedCoords((prev) => ({ ...prev, [id]: !prev[id] }));
   const { notice, notify } = useNotice();
@@ -510,11 +508,15 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
     };
   }, [deskInfoOpen, deskMenuOpen, selectedWorktree?.path]);
 
-  const openDeskInfo = useCallback((nextTab: InfoTab = 'info') => {
-    setDeskInfoTab(nextTab);
-    setDeskInfoOpen(true);
-    setDeskMenuOpen(false);
-  }, []);
+  const openDeskInfo = useCallback(
+    (nextTab: InfoTab = 'info') => {
+      setDeskInfoTab(nextTab);
+      setDeskInfoOpen(true);
+      setDeskMenuOpen(false);
+      refreshDeskQuota();
+    },
+    [refreshDeskQuota],
+  );
 
   const deskTeamAgents = useMemo<TeamTreeAgent[]>(() => {
     const list = selectedWorktree?.agents || overview?.agents || [];
@@ -907,11 +909,6 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
               <FolderPlus size={16} />
               프로젝트 추가
             </button>
-            <button className="desk-side-link" onClick={() => setCreditsOpen(true)}>
-              <Sparkles size={14} />
-              크레딧 · 런타임
-              <ChevronRight size={13} />
-            </button>
           </div>
         </aside>
 
@@ -934,10 +931,6 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="desk-top-actions" ref={deskMenuRef}>
-              <button className="desk-btn ghost" onClick={() => setCreditsOpen(true)}>
-                <Sparkles size={14} />
-                <span>크레딧</span>
-              </button>
               <button
                 className="desk-icon"
                 onClick={() => void load(true)}
@@ -1010,10 +1003,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                   <button
                     className="menu-item"
                     role="menuitem"
-                    onClick={() => {
-                      setDeskMenuOpen(false);
-                      setCreditsOpen(true);
-                    }}
+                    onClick={() => openDeskInfo('info')}
                   >
                     <span className="menu-ico"><Activity size={16} /></span>
                     <span>사용량 한도</span>
@@ -1175,82 +1165,95 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
           onOpenInfo={openDeskInfo}
         />
       )}
-      <InfoPanel
-        open={deskInfoOpen}
-        tab={deskInfoTab}
-        onTab={setDeskInfoTab}
-        onClose={() => setDeskInfoOpen(false)}
-        session={
-          selectedWorktree
-            ? {
-                id: logAgent?.orcaSessionId || logAgent?.terminalHandle || selectedWorktree.id,
-                title: logAgent
-                  ? cleanAgentTitle(logAgent.title)
-                  : formatWorktreeName(selectedWorktree),
-                directory: selectedWorktree.path,
-                agent: logAgent?.agent || 'orca',
-                time: {
-                  created:
-                    logAgent?.updatedAt || selectedWorktree.lastActivityAt || Date.now(),
-                  updated:
-                    logAgent?.updatedAt || selectedWorktree.lastActivityAt || Date.now(),
-                },
-                version: '1',
-                projectID: selectedWorktree.repoId || selectedWorktree.repo,
-              }
-            : null
-        }
-        parentSession={null}
-        messages={[]}
-        diffs={(deskWorktreeDiff?.diffs || []) as FileDiff[]}
-        children={[]}
-        gitFiles={(deskWorktreeDiff?.files || []) as AgentFile[]}
-        vcs={
-          deskWorktreeDiff?.branch || selectedWorktree?.branch
-            ? {
-                branch: deskWorktreeDiff?.branch || selectedWorktree?.branch,
-                default_branch: 'main',
-              }
-            : null
-        }
-        pathInfo={
-          selectedWorktree
-            ? {
-                state: '',
-                config: '',
-                worktree: selectedWorktree.path,
-                directory: selectedWorktree.path,
-              }
-            : null
-        }
-        providers={logAgent ? agentMeta(logAgent.agent).label : 'Orca'}
-        modelName={
-          logAgent
-            ? resolveModelLabel(
-                (logAgent.orcaSessionId &&
-                  localStorage.getItem(`agyModel:${logAgent.orcaSessionId}`)) ||
-                  '',
-                logAgent.agent,
-              ) || agentMeta(logAgent.agent).label
-            : selectedWorktree
-              ? formatWorktreeName(selectedWorktree)
-              : '워크트리'
-        }
-        contextLimit={200_000}
-        activeEngine={logAgent?.agent || 'agy'}
-        codexQuota={deskCodexQuota}
-        teamAgents={deskTeamAgents}
-        quota={deskAgyQuota}
-        quotaLoading={deskQuotaLoading}
-        onRefreshQuota={refreshDeskQuota}
-        pinned={deskPins}
-        onTogglePin={toggleDeskPin}
-        onOpenSession={() => undefined}
-        onToast={notify}
-      />
-      {creditsOpen && (
-        <CreditsDrawer overview={overview} onClose={() => setCreditsOpen(false)} />
-      )}
+      {(() => {
+        const activeDeskAgent =
+          logAgent ||
+          selectedWorktree?.agents?.find((item) => item.state === 'working') ||
+          selectedWorktree?.agents?.[0] ||
+          null;
+        return (
+          <InfoPanel
+            open={deskInfoOpen}
+            tab={deskInfoTab}
+            onTab={setDeskInfoTab}
+            onClose={() => setDeskInfoOpen(false)}
+            session={
+              selectedWorktree
+                ? {
+                    id:
+                      activeDeskAgent?.orcaSessionId ||
+                      activeDeskAgent?.terminalHandle ||
+                      selectedWorktree.id,
+                    title: activeDeskAgent
+                      ? cleanAgentTitle(activeDeskAgent.title)
+                      : formatWorktreeName(selectedWorktree),
+                    directory: selectedWorktree.path,
+                    agent: activeDeskAgent?.agent || 'orca',
+                    time: {
+                      created:
+                        activeDeskAgent?.updatedAt ||
+                        selectedWorktree.lastActivityAt ||
+                        Date.now(),
+                      updated:
+                        activeDeskAgent?.updatedAt ||
+                        selectedWorktree.lastActivityAt ||
+                        Date.now(),
+                    },
+                    version: '1',
+                    projectID: selectedWorktree.repoId || selectedWorktree.repo,
+                  }
+                : null
+            }
+            parentSession={null}
+            messages={[]}
+            diffs={(deskWorktreeDiff?.diffs || []) as FileDiff[]}
+            children={[]}
+            gitFiles={(deskWorktreeDiff?.files || []) as AgentFile[]}
+            vcs={
+              deskWorktreeDiff?.branch || selectedWorktree?.branch
+                ? {
+                    branch: deskWorktreeDiff?.branch || selectedWorktree?.branch,
+                    default_branch: 'main',
+                  }
+                : null
+            }
+            pathInfo={
+              selectedWorktree
+                ? {
+                    state: '',
+                    config: '',
+                    worktree: selectedWorktree.path,
+                    directory: selectedWorktree.path,
+                  }
+                : null
+            }
+            providers={activeDeskAgent ? agentMeta(activeDeskAgent.agent).label : 'Orca'}
+            modelName={
+              activeDeskAgent
+                ? resolveModelLabel(
+                    (activeDeskAgent.orcaSessionId &&
+                      localStorage.getItem(`agyModel:${activeDeskAgent.orcaSessionId}`)) ||
+                      '',
+                    activeDeskAgent.agent,
+                  ) || agentMeta(activeDeskAgent.agent).label
+                : selectedWorktree
+                  ? formatWorktreeName(selectedWorktree)
+                  : '워크트리'
+            }
+            contextLimit={0}
+            activeEngine={activeDeskAgent?.agent || 'agy'}
+            codexQuota={deskCodexQuota}
+            teamAgents={deskTeamAgents}
+            quota={deskAgyQuota}
+            quotaLoading={deskQuotaLoading}
+            onRefreshQuota={refreshDeskQuota}
+            pinned={deskPins}
+            onTogglePin={toggleDeskPin}
+            onOpenSession={() => undefined}
+            onToast={notify}
+          />
+        );
+      })()}
       {addOpen && (
         <AddProjectDialog
           onClose={() => setAddOpen(false)}
@@ -5432,313 +5435,6 @@ function LogDrawer({
   );
 }
 
-type CodexQuotaWindow = {
-  usedPercent: number;
-  windowDurationMins?: number | null;
-  resetsAt?: number | null;
-};
-
-type CodexQuota = {
-  ok?: boolean;
-  plan?: string | null;
-  primary?: CodexQuotaWindow | null;
-  secondary?: CodexQuotaWindow | null;
-  error?: string;
-};
-
-function codexWindowLabel(minutes?: number | null) {
-  if (!minutes) return '';
-  if (minutes >= 10_080) return `${Math.round(minutes / 1_440)}일`;
-  if (minutes >= 60) return `${Math.round(minutes / 60)}시간`;
-  return `${minutes}분`;
-}
-
-function CreditsDrawer({
-  overview,
-  onClose,
-}: {
-  overview: OrcaOverview | null;
-  onClose: () => void;
-}) {
-  const { quota, loading: agyLoading, refresh: refreshAgy } = useAgyQuota(true);
-  const [freebuff, setFreebuff] = useState<FreebuffUsage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [codex, setCodex] = useState<CodexQuota | null>(null);
-  const [codexLoading, setCodexLoading] = useState(true);
-  const [codexError, setCodexError] = useState<string | null>(null);
-
-  const load = useCallback(async (refresh = false) => {
-    setLoading(true);
-    try {
-      const next = await orcaApi.usage(refresh);
-      setFreebuff(next);
-      setError(next.ok ? null : next.error || 'Freebuff 사용량을 불러오지 못했어요.');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Freebuff 사용량을 불러오지 못했어요.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadCodex = useCallback(async () => {
-    setCodexLoading(true);
-    setCodexError(null);
-    try {
-      const response = await fetch('/codex-api/quota', { credentials: 'include' });
-      const body = (await response.json().catch(() => ({}))) as CodexQuota;
-      if (!response.ok || body.ok === false) {
-        throw new Error(body.error || `Codex 한도 요청 실패 (${response.status})`);
-      }
-      setCodex(body);
-    } catch (cause) {
-      setCodexError(cause instanceof Error ? cause.message : 'Codex 계정 한도를 읽지 못했어요.');
-    } finally {
-      setCodexLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadCodex();
-  }, [loadCodex]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const refresh = () => {
-    refreshAgy();
-    void load(true);
-    void loadCodex();
-  };
-
-  const codexWindows = [
-    { label: '5시간', window: codex?.primary },
-    { label: '주간', window: codex?.secondary },
-  ].filter((entry) => entry.window);
-
-  return createPortal(
-    <div className="desk-drawer-layer">
-      <div className="desk-drawer-backdrop" onClick={onClose} />
-      <aside className="desk-credit-panel" role="dialog" aria-modal="true" aria-label="크레딧과 런타임">
-        <div className="desk-drawer-head">
-          <div>
-            <span className="desk-kicker">
-              <Sparkles size={12} /> CREDIT TREE
-            </span>
-            <h2>크레딧 · 런타임</h2>
-            <p>Orca 호스트와 연결된 실제 계정의 상태만 표시합니다.</p>
-          </div>
-          <button className="desk-icon" onClick={onClose} aria-label="닫기">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="desk-credit-scroll">
-          <section className="desk-credit-node">
-            <div className="desk-credit-root">
-              <span className="desk-credit-icon freebuff">
-                <AgentMark id="freebuff" short="FB" />
-              </span>
-              <div>
-                <strong>Freebuff</strong>
-                <span>
-                  {freebuff?.configured ? 'CLI 계정 연결됨' : 'CLI 로그인 필요'}
-                </span>
-              </div>
-              <span className={`desk-credit-pill ${freebuff?.ok ? 'ok' : 'warn'}`}>
-                {freebuff?.ok ? freebuff.plan || 'free' : '확인 불가'}
-              </span>
-            </div>
-            <div className="desk-credit-branch">
-              <div className="desk-credit-row">
-                <span>API 크레딧</span>
-                <strong>
-                  {freebuff?.apiCredits
-                    ? freebuff.apiCredits.remaining.toLocaleString('ko-KR')
-                    : '—'}
-                </strong>
-              </div>
-              <div className="desk-credit-row">
-                <span>이번 달 사용</span>
-                <strong>
-                  {freebuff?.apiCredits
-                    ? freebuff.apiCredits.usage.toLocaleString('ko-KR')
-                    : '—'}
-                </strong>
-              </div>
-              <div className="desk-credit-row">
-                <span>다음 리셋까지</span>
-                <strong>
-                  {remainingUntilLabel(freebuff?.apiCredits?.nextResetAt) || '—'}
-                </strong>
-              </div>
-              <div className="desk-credit-row muted">
-                <span>컨텍스트 · 추론</span>
-                <strong>세션 종료 시 터미널 표시</strong>
-              </div>
-              <div className="desk-freebuff-model-list">
-                <div className="desk-freebuff-model-list-head">
-                  <span>모델</span>
-                  <span>1시간 세션</span>
-                  <span>effort</span>
-                </div>
-                {FREEBUFF_MODELS.map((freebuffModel) => (
-                  <div className="desk-freebuff-model-list-row" key={freebuffModel.id}>
-                    <strong>{freebuffModel.label}</strong>
-                    <span>{freebuffModel.hours}시간</span>
-                    <span>{freebuffModel.effort}</span>
-                  </div>
-                ))}
-                <p>/model은 Freebuff 네이티브 명령입니다.</p>
-              </div>
-              {freebuff?.note && <p className="desk-credit-note">{freebuff.note}</p>}
-              {error && <p className="desk-credit-error">{error}</p>}
-              <button className="desk-credit-refresh" onClick={() => void load(true)} disabled={loading}>
-                <RefreshCw size={12} className={loading ? 'spin' : ''} />
-                Freebuff 다시 읽기
-              </button>
-            </div>
-          </section>
-
-          <section className="desk-credit-node">
-            <div className="desk-credit-root">
-              <span className="desk-credit-icon agy">
-                <AgentMark id="antigravity" short="AGY" />
-              </span>
-              <div>
-                <strong>Agy</strong>
-                <span>Agy CLI /usage · 실제 구독 한도</span>
-              </div>
-              <span className="desk-credit-pill ok">{agyLoading ? '…' : 'live'}</span>
-            </div>
-            <div className="desk-credit-branch">
-              {quota?.groups.length ? (
-                quota.groups.map((group) => (
-                  <div className="desk-credit-group" key={group.name}>
-                    <div className="desk-credit-group-name">{group.name}</div>
-                    {group.buckets.map((bucket) => (
-                      <div className="desk-credit-bucket" key={`${group.name}-${bucket.id}-${bucket.window}`}>
-                        <div>
-                          <span>{bucket.window === '5h' ? '5시간' : bucket.window === 'weekly' ? '주간' : bucket.name}</span>
-                          <strong>
-                            {bucket.disabled
-                              ? '미적용'
-                              : bucket.remaining === null
-                                ? '측정 없음'
-                                : `${bucket.remaining}%`}
-                          </strong>
-                        </div>
-                        <div className="desk-credit-bar">
-                          <span style={{ width: `${bucket.remaining ?? 0}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ))
-              ) : (
-                <p className="desk-credit-note">
-                  {quota?.error || (agyLoading ? 'Agy 한도를 불러오는 중…' : '표시할 Agy 한도가 없어요.')}
-                </p>
-              )}
-              <button className="desk-credit-refresh" onClick={refreshAgy} disabled={agyLoading}>
-                <RefreshCw size={12} className={agyLoading ? 'spin' : ''} />
-                Agy 다시 읽기
-              </button>
-            </div>
-          </section>
-
-          <section className="desk-credit-node">
-            <div className="desk-credit-root">
-              <span className="desk-credit-icon codex">
-                <AgentMark id="codex" short="CX" />
-              </span>
-              <div>
-                <strong>Codex</strong>
-                <span>Codex CLI · ChatGPT 계정 한도</span>
-              </div>
-              <span className={`desk-credit-pill ${codex?.plan ? 'ok' : 'warn'}`}>
-                {codexLoading ? '…' : codex?.plan || '확인 불가'}
-              </span>
-            </div>
-            <div className="desk-credit-branch">
-              {codexLoading && !codex ? (
-                <p className="desk-credit-note">Codex 계정 한도를 불러오는 중…</p>
-              ) : codexError && !codex ? (
-                <p className="desk-credit-error">{codexError}</p>
-              ) : codexWindows.length ? (
-                codexWindows.map((entry) => {
-                  const window = entry.window as CodexQuotaWindow;
-                  const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
-                  return (
-                    <div className="desk-credit-bucket" key={entry.label}>
-                      <div>
-                        <span>{codexWindowLabel(window.windowDurationMins) || entry.label}</span>
-                        <strong>{remaining}%</strong>
-                      </div>
-                      <div className="desk-credit-bar">
-                        <span style={{ width: `${remaining}%` }} />
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="desk-credit-note">Codex CLI가 계정 한도 창을 반환하지 않았어요.</p>
-              )}
-              <div className="desk-credit-row">
-                <span>모델</span>
-                <strong>GPT-6 Luna</strong>
-              </div>
-              <div className="desk-credit-row">
-                <span>컨텍스트</span>
-                <strong>272k</strong>
-              </div>
-              {codexError && codex && <p className="desk-credit-error">{codexError}</p>}
-              <button className="desk-credit-refresh" onClick={() => void loadCodex()} disabled={codexLoading}>
-                <RefreshCw size={12} className={codexLoading ? 'spin' : ''} />
-                Codex 다시 읽기
-              </button>
-            </div>
-          </section>
-
-          <section className="desk-credit-node">
-            <div className="desk-credit-root">
-              <span className="desk-credit-icon orca">
-                <Boxes size={15} />
-              </span>
-              <div>
-                <strong>Orca runtime</strong>
-                <span>{overview?.host || 'local'} · worktree fleet</span>
-              </div>
-            </div>
-            <div className="desk-credit-branch">
-              <div className="desk-credit-row">
-                <span>워크트리</span>
-                <strong>{overview?.counts.worktrees ?? 0}</strong>
-              </div>
-              <div className="desk-credit-row">
-                <span>등록된 에이전트</span>
-                <strong>{overview?.counts.agents ?? 0}</strong>
-              </div>
-              <div className="desk-credit-row">
-                <span>작업 중</span>
-                <strong className="hot">{overview?.counts.working ?? 0}</strong>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <div className="desk-drawer-foot">
-          <button className="desk-btn ghost" onClick={refresh}>
-            <RefreshCw size={13} /> 전체 새로고침
-          </button>
-          <span>값은 서버에서만 읽고 브라우저로 자격 증명을 보내지 않습니다.</span>
-        </div>
-      </aside>
-    </div>,
-    document.body,
-  );
-}
 
 function AddProjectDialog({
   onClose,
