@@ -530,19 +530,21 @@ export function CodexPanel({
     };
   }, [onClose, permissionOpen, settingsClosing, settingsPanel, statsVisible]);
 
-  const send = async (event?: FormEvent) => {
+  const send = async (event?: FormEvent, overrideText?: string) => {
     event?.preventDefault();
-    const prompt = draft.trim();
+    const prompt = (overrideText ?? draft).trim();
     if (!prompt || busy) return;
     const generation = generationRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setMessages((current) => [
-      ...current,
-      { id: `u_${Date.now().toString(36)}`, role: 'user', text: prompt, at: Date.now() },
-    ]);
-    setDraft('');
+    if (!overrideText) {
+      setMessages((current) => [
+        ...current,
+        { id: `u_${Date.now().toString(36)}`, role: 'user', text: prompt, at: Date.now() },
+      ]);
+      setDraft('');
+    }
     setError(null);
     setBusy(true);
     setElapsed(0);
@@ -793,7 +795,7 @@ export function CodexPanel({
               <button
                 type="button"
                 className="meta-btn"
-                onClick={() => void send(messages[messages.length - 1].text)}
+                onClick={() => void send(undefined, messages[messages.length - 1].text)}
               >
                 다시 보내기
               </button>
