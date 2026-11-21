@@ -4781,7 +4781,7 @@ function LogDrawer({
                   }}
                 />
                 <span>
-                  {isAgyChat ? agyTimeLabel || agyRemainingLabel : isChat ? '채팅' : '실시간'}
+                  {isAgyChat ? agyRemainingLabel : isChat ? '채팅' : '실시간'}
                 </span>
               </button>
             </div>
