@@ -283,16 +283,21 @@ function cleanAgentTitle(title?: string | null) {
 }
 
 function formatWorktreeName(worktree: Pick<OrcaWorktree, 'displayName' | 'branch' | 'path'>) {
-  const raw = (worktree.displayName || worktree.branch || worktree.path.split('/').pop() || 'worktree').trim();
-  return raw.replace(/^(?:orca|wt)[/_-]+/i, '') || raw;
+  const raw = (worktree.displayName || worktree.branch || worktree.path.split('/').pop() || 'worktree')
+    .trim()
+    .replace(/^(?:orca|wt)[/_-]+/i, '');
+  if (/^(main|master)$/i.test(raw)) return '메인 작업공간';
+  const parallelMatch = raw.match(/^(?:parallel|agent-desk)-([a-z0-9]+)-(\d+)$/i);
+  if (parallelMatch) return `병렬 작업 #${parallelMatch[2]} (${parallelMatch[1]})`;
+  return raw || '작업공간';
 }
 
 function worktreeSubMeta(worktree: Pick<OrcaWorktree, 'displayName' | 'branch' | 'path'>) {
-  const title = formatWorktreeName(worktree);
-  if (worktree.branch && worktree.branch !== title && worktree.branch !== worktree.displayName) {
-    return worktree.branch;
+  const pathText = shortPath(worktree.path);
+  if (worktree.branch && worktree.branch !== worktree.displayName) {
+    return `${worktree.branch} · ${pathText}`;
   }
-  return shortPath(worktree.path);
+  return pathText;
 }
 
 export function ParallelDesk({ onClose }: { onClose: () => void }) {
@@ -309,6 +314,9 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const [logAgent, setLogAgent] = useState<OrcaAgent | null>(null);
   const [openingTerminal, setOpeningTerminal] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [expandedCoords, setExpandedCoords] = useState<Record<string, boolean>>({});
+  const toggleCoord = (id: string) =>
+    setExpandedCoords((prev) => ({ ...prev, [id]: !prev[id] }));
   const { notice, notify } = useNotice();
   const loadingRef = useRef(false);
   const restoreLogRef = useRef(initialDeskState.current.handle);
@@ -654,48 +662,96 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                             )}
                           </button>
                         </div>
-                        {worktree.agents.length > 0 && (
-                          <div
-                            className="desk-side-agents"
-                            aria-label={`${worktree.displayName} 에이전트`}
-                          >
-                            {worktree.agents.map((agent) => {
-                              const meta = agentMeta(agent.agent);
-                              return (
-                                <button
-                                  type="button"
-                                  className={`desk-side-agent ${agent.state}`}
-                                  key={agent.id}
-                                  onClick={() => {
-                                    setSelectedPath(worktree.path);
-                                    openLog(agent);
-                                    setSideOpen(false);
-                                  }}
-                                  title={agent.title}
-                                >
-                                  <span
-                                    className={`desk-agent-badge desk-side-agent-badge ${meta.cls}`}
-                                  >
-                                    <AgentMark id={meta.id} short={meta.short} />
-                                  </span>
-                                  <span className="desk-side-agent-main">
-                                    <strong>{meta.label}</strong>
-                                    <small>{cleanAgentTitle(agent.title)}</small>
-                                  </span>
-                                  {agent.role ? (
-                                    <span className={`desk-role ${agent.role}`}>
-                                      {roleLabel(agent.role)}
-                                    </span>
-                                  ) : (
-                                    <span className={`desk-state ${agent.state}`}>
-                                      {stateLabel(agent.state)}
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
+                        {worktree.agents.length > 0 && (() => {
+                          const coordinators = worktree.agents.filter((a) => a.role === 'coordinator');
+                          const localWorkers = worktree.agents.filter((a) => a.role === 'worker');
+                          const projectWorkers = project.worktrees.flatMap((w) =>
+                            w.agents.filter((a) => a.role === 'worker'),
+                          );
+                          const worktreeWorkers =
+                            coordinators.length > 0 && projectWorkers.length > localWorkers.length
+                              ? projectWorkers
+                              : localWorkers;
+                          const singles = worktree.agents.filter((a) => !a.role);
+                          const renderAgentRow = (agent: OrcaAgent, extraSub?: string) => {
+                            const meta = agentMeta(agent.agent);
+                            const badgeText = agent.role
+                              ? roleLabel(agent.role)
+                              : agent.agent === 'terminal'
+                                ? '터미널'
+                                : '단일 워커';
+                            const badgeCls = agent.role || (agent.agent === 'terminal' ? 'shell' : 'single');
+                            return (
+                              <button
+                                type="button"
+                                className={`desk-side-agent ${agent.state}`}
+                                key={agent.id}
+                                onClick={() => {
+                                  setSelectedPath(agent.path || worktree.path);
+                                  openLog(agent);
+                                  setSideOpen(false);
+                                }}
+                                title={agent.title}
+                              >
+                                <span className={`desk-agent-badge desk-side-agent-badge ${meta.cls}`}>
+                                  <AgentMark id={meta.id} short={meta.short} />
+                                </span>
+                                <span className="desk-side-agent-main">
+                                  <strong>{meta.label}</strong>
+                                  <small>{extraSub ? `${extraSub} · ${cleanAgentTitle(agent.title)}` : cleanAgentTitle(agent.title)}</small>
+                                </span>
+                                <span className={`desk-role ${badgeCls}`}>{badgeText}</span>
+                              </button>
+                            );
+                          };
+                          return (
+                            <div
+                              className="desk-side-agents"
+                              aria-label={`${worktree.displayName} 에이전트`}
+                            >
+                              {coordinators.map((coord, coordIdx) => {
+                                const childWorkers = coordIdx === 0 ? worktreeWorkers : [];
+                                const isOpen = Boolean(expandedCoords[coord.id]);
+                                return (
+                                  <div key={coord.id} className="desk-side-coord-group">
+                                    {renderAgentRow(coord)}
+                                    {childWorkers.length > 0 && (
+                                      <div className="desk-side-workers-wrap">
+                                        <button
+                                          type="button"
+                                          className="desk-side-workers-toggle"
+                                          onClick={() => toggleCoord(coord.id)}
+                                          aria-expanded={isOpen}
+                                        >
+                                          <ChevronRight size={11} className={isOpen ? 'rot' : ''} />
+                                          <span>워커 {childWorkers.length}명</span>
+                                        </button>
+                                        {isOpen && (
+                                          <div className="desk-side-worker-children">
+                                            {childWorkers.map((worker) =>
+                                              renderAgentRow(
+                                                worker,
+                                                worker.branch && worker.branch !== worktree.branch
+                                                  ? worker.branch
+                                                  : formatWorktreeName({
+                                                      displayName: worker.path.split('/').pop() || '',
+                                                      branch: worker.branch,
+                                                      path: worker.path,
+                                                    }),
+                                              ),
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {coordinators.length === 0 && worktreeWorkers.map((w) => renderAgentRow(w))}
+                              {singles.map((s) => renderAgentRow(s))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -1423,7 +1479,7 @@ function AgentsTab({
 }
 
 function roleLabel(role: OrcaAgent['role']) {
-  if (role === 'coordinator') return '코디네이터';
+  if (role === 'coordinator') return '지휘자';
   if (role === 'worker') return '워커';
   return '';
 }
