@@ -327,8 +327,10 @@ export const orcaApi = {
     ),
   transcript: (sessionId: string) =>
     request<TranscriptPayload>(`/transcript?sessionId=${encodeURIComponent(sessionId)}`),
-  freebuffSession: (path: string) =>
-    request<FreebuffSessionPayload>(`/freebuff/session?path=${encodeURIComponent(path)}`),
+  freebuffSession: (path: string, kind?: string) =>
+    request<FreebuffSessionPayload>(
+      `/freebuff/session?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}`,
+    ),
   addProject: (path: string) =>
     request<{ ok: boolean; path: string; kind: string; overview: OrcaOverview }>('/projects', {
       method: 'POST',

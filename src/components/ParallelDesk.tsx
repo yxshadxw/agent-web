@@ -3071,10 +3071,17 @@ function LogDrawer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const freebuffPanelTimerRef = useRef<number | undefined>(undefined);
   const sentPathRef = useRef(agent.path);
+  const isOpenCode =
+    agent.agent === 'opencode' ||
+    /^OpenCode\b/i.test(agent.title) ||
+    /^OpenCode\b/i.test(agent.terminalTitle || '');
+  // OpenCode shares Freebuff's structured chat view instead of a raw terminal.
   const isFreebuff =
+    isOpenCode ||
     agent.agent === 'freebuff' ||
     /^Freebuff\b/i.test(agent.title) ||
     /^Freebuff\b/i.test(agent.terminalTitle || '');
+  const agentLabel = isOpenCode ? 'OpenCode' : 'Freebuff';
   const isShell = agent.agent === 'terminal' && !isFreebuff;
   const isChat =
     !isFreebuff &&
@@ -3083,7 +3090,9 @@ function LogDrawer({
   const isAgy = agent.agent === 'antigravity';
   const isAgyChat = isChat && isAgy;
   const { quota: agyQuota } = useAgyQuota(isAgy);
-  const displayMeta = isFreebuff
+  const displayMeta = isOpenCode
+    ? { id: 'opencode', label: 'OpenCode', short: 'OC', cls: 'opencode' }
+    : isFreebuff
     ? { id: 'freebuff', label: 'Freebuff', short: 'FB', cls: 'freebuff' }
     : agentMeta(agent.agent);
   const transcriptEntries = useMemo(
@@ -3330,7 +3339,7 @@ function LogDrawer({
       }
       if (isFreebuff) {
         void orcaApi
-          .freebuffSession(agent.path)
+          .freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined)
           .then((next) =>
             setFreebuffSession((current) =>
               current &&
@@ -3360,7 +3369,7 @@ function LogDrawer({
         loadInFlightRef.current = false;
       }
     }
-  }, [agent.path, agent.terminalHandle, agent.orcaSessionId, isFreebuff]);
+  }, [agent.path, agent.terminalHandle, agent.orcaSessionId, isFreebuff, isOpenCode]);
 
   useEffect(() => {
     void load();
@@ -3671,7 +3680,7 @@ function LogDrawer({
           void orcaApi.transcript(agent.orcaSessionId).then(setTranscript).catch(() => undefined);
         }
         if (isFreebuff) {
-          void orcaApi.freebuffSession(agent.path).then(setFreebuffSession).catch(() => undefined);
+          void orcaApi.freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined).then(setFreebuffSession).catch(() => undefined);
         }
       };
       window.setTimeout(refresh, 700);
@@ -3770,7 +3779,7 @@ function LogDrawer({
                 {agent.role && (
                   <em className={`desk-role ${agent.role}`}>{roleLabel(agent.role)}</em>
                 )}
-                {isFreebuff ? 'Freebuff' : agent.title}
+                {isFreebuff ? agentLabel : agent.title}
               </strong>
               <span>
                 {isFreebuff
@@ -3816,7 +3825,7 @@ function LogDrawer({
                 {interrupting ? <Loader2 size={15} className="spin" /> : <Pause size={15} />}
               </button>
             )}
-            {isFreebuff && (
+            {isFreebuff && !isOpenCode && (
               <button
                 className="desk-icon"
                 onClick={() => void continueSession()}
@@ -3871,7 +3880,7 @@ function LogDrawer({
             {view === 'chat' && hasTranscript
               ? `${isChat ? 'Orca 채팅' : 'Orca 세션 기록'}${transcript?.state ? ` · ${transcript.state}` : ''}`
               : isFreebuff && freebuffSessionEntries.length
-                ? `Freebuff 세션 기록 · ${freebuffSessionEntries.length}`
+                ? `${agentLabel} 세션 기록 · ${freebuffSessionEntries.length}`
                 : snapshot?.source || (isChat ? 'Orca 채팅' : 'screen')}
           </span>
           <span>
@@ -4085,7 +4094,7 @@ function LogDrawer({
                       <AgentMark id={displayMeta.id} short={displayMeta.short} />
                     </span>
                     <h2>무엇을 도와드릴까요?</h2>
-                    <p>Freebuff가 이 워크트리를 읽고, 실행하고, 파일을 수정합니다.</p>
+                    <p>{agentLabel}가 이 워크트리를 읽고, 실행하고, 파일을 수정합니다.</p>
                     <div className="empty-hint">
                       <Terminal size={13} /> Enter로 전송 · Shift+Enter로 줄바꿈
                     </div>

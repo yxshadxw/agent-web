@@ -1079,6 +1079,49 @@ function findFreebuffChat(projectDir, requestedChat) {
   return chosen;
 }
 
+const OPENCODE_URL = process.env.OPENCODE_URL || 'http://127.0.0.1:4097';
+
+function opencodeEntries(messages) {
+  const entries = [];
+  for (const m of messages) {
+    const role = m?.info?.role;
+    const at = m?.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined;
+    for (const part of m?.parts || []) {
+      if (part.type === 'text') {
+        if (!String(part.text || '').trim() || part.synthetic) continue;
+        entries.push({ kind: 'message', role: role === 'user' ? 'user' : 'assistant', at, text: clipFreebuffSessionText(part.text, FREEBUFF_SESSION_TEXT_MAX) });
+      } else if (part.type === 'reasoning') {
+        if (String(part.text || '').trim()) entries.push({ kind: 'thinking', at, text: clipFreebuffSessionText(part.text, FREEBUFF_SESSION_TEXT_MAX) });
+      } else if (part.type === 'tool') {
+        const st = part.state || {};
+        const out = typeof st.output === 'string' ? st.output : st.error ? String(st.error) : '';
+        entries.push({
+          kind: 'tool', at, name: String(part.tool || 'tool'),
+          command: freebuffToolCommand(st.input),
+          output: clipFreebuffSessionText(out, FREEBUFF_SESSION_OUTPUT_MAX),
+          running: st.status === 'pending' || st.status === 'running',
+        });
+      }
+    }
+  }
+  return entries;
+}
+
+async function readOpencodeSession(rawPath) {
+  const worktree = await resolveWorktreePath(rawPath);
+  const dir = encodeURIComponent(worktree.path);
+  const { body: list } = await fetchJson(`${OPENCODE_URL}/session?directory=${dir}`, {});
+  const sessions = (Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [])
+    .filter((x) => x.directory === worktree.path && !x.parentID)
+    .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
+  if (!sessions.length) return { ok: false, entries: [], error: 'OpenCode 세션을 찾지 못했습니다.', fetchedAt: new Date().toISOString() };
+  const chosen = sessions[0];
+  const { body: msgs } = await fetchJson(`${OPENCODE_URL}/session/${chosen.id}/message?directory=${dir}`, {});
+  const messages = Array.isArray(msgs?.data) ? msgs.data : Array.isArray(msgs) ? msgs : [];
+  const entries = opencodeEntries(messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT)).slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
+  return { ok: true, entries, chatId: chosen.id, updatedAt: chosen.time?.updated || Date.now(), truncated: false, fetchedAt: new Date().toISOString() };
+}
+
 async function readFreebuffSession(rawPath, requestedChat) {
   const worktree = await resolveWorktreePath(rawPath);
   const projectDir = freebuffProjectDirForPath(worktree.path);
@@ -1981,6 +2024,10 @@ async function route(req, res) {
 
   if (method === 'GET' && path === '/freebuff/session') {
     try {
+      if (url.searchParams.get('kind') === 'opencode') {
+        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || ''));
+        return;
+      }
       json(
         res,
         200,
