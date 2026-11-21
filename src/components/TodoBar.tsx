@@ -215,17 +215,12 @@ export function deriveTodosFromTools(
   busy = false,
 ): TodoItem[] {
   const checklist = parseChecklistTodos(texts, busy);
-  if (checklist.length >= 2) return checklist.slice(0, 8);
+  if (checklist.length >= 1) return checklist;
 
   if (!busy && tools.length === 0) return [];
 
-  const stages: { key: ToolPhase; label: string }[] = [
-    { key: 'explore', label: '작업 범위 및 코드 구조 파악' },
-    { key: 'edit', label: '코드 수정 및 기능 구현' },
-    { key: 'verify', label: '빌드 및 테스트 검증' },
-    { key: 'finish', label: '변경사항 반영 및 결과 정리' },
-  ];
-
+  const stepMap = new Map<string, { label: string; phase: ToolPhase }>();
+  let highestPhaseIdx = 0;
   const order: Record<ToolPhase, number> = {
     explore: 0,
     edit: 1,
@@ -233,33 +228,59 @@ export function deriveTodosFromTools(
     finish: 3,
   };
 
-  let highestPhaseIdx = 0;
   for (const tool of tools) {
     const { phase, detailLabel } = classifyTool(tool);
     const idx = order[phase];
-    if (detailLabel) stages[idx].label = detailLabel;
     if (idx > highestPhaseIdx) highestPhaseIdx = idx;
+    const label =
+      detailLabel ||
+      (phase === 'explore'
+        ? '작업 범위 및 코드 구조 파악'
+        : phase === 'edit'
+          ? '코드 수정 및 기능 구현'
+          : phase === 'verify'
+            ? '빌드 및 테스트 검증'
+            : '변경사항 반영 및 결과 정리');
+    const key = `${phase}:${label}`;
+    if (!stepMap.has(key)) {
+      stepMap.set(key, { label, phase });
+    }
   }
 
+  if (stepMap.size === 0) {
+    stepMap.set('explore:init', { label: '작업 범위 및 코드 구조 파악', phase: 'explore' });
+  }
+  if (busy) {
+    if (highestPhaseIdx < 1 && ![...stepMap.values()].some((s) => s.phase === 'edit')) {
+      stepMap.set('edit:pending', { label: '코드 수정 및 기능 구현', phase: 'edit' });
+    }
+    if (highestPhaseIdx < 2 && ![...stepMap.values()].some((s) => s.phase === 'verify')) {
+      stepMap.set('verify:pending', { label: '빌드 및 동작 검증', phase: 'verify' });
+    }
+  }
+
+  const entries = [...stepMap.entries()];
   if (!busy) {
-    // Task finished: all 4 planned steps are completed.
-    return stages.map((stage, idx) => ({
-      id: `stage-${stage.key}-${idx}`,
-      content: stage.label,
+    return entries.map(([key, item], idx) => ({
+      id: `step-${idx}-${key}`,
+      content: item.label,
       status: 'completed',
     }));
   }
 
-  // Task is currently running: all 4 todos exist from the start; earlier phases
-  // are completed, current phase is in_progress (yellow), later phases are pending.
-  return stages.map((stage, idx) => ({
-    id: `stage-${stage.key}-${idx}`,
-    content: stage.label,
-    status:
-      idx < highestPhaseIdx
-        ? 'completed'
-        : idx === highestPhaseIdx
-          ? 'in_progress'
-          : 'pending',
-  }));
+  let activeAssigned = false;
+  return entries.map(([key, item], idx) => {
+    const pIdx = order[item.phase];
+    if (pIdx < highestPhaseIdx) {
+      return { id: `step-${idx}-${key}`, content: item.label, status: 'completed' };
+    }
+    if (pIdx === highestPhaseIdx && !activeAssigned) {
+      activeAssigned = true;
+      return { id: `step-${idx}-${key}`, content: item.label, status: 'in_progress' };
+    }
+    if (pIdx === highestPhaseIdx) {
+      return { id: `step-${idx}-${key}`, content: item.label, status: 'completed' };
+    }
+    return { id: `step-${idx}-${key}`, content: item.label, status: 'pending' };
+  });
 }
