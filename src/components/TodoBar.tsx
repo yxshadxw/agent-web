@@ -179,9 +179,11 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
         .replace(/\*\*/g, '')
         .replace(/`/g, '')
         .trim();
-      if (!content || content.length > 90) continue;
+      if (!content || content.length > 360) continue;
       if (/orca\s+orchestration\s+reply|오퍼레이터에게.*회신/i.test(content)) continue;
-      const key = content.toLowerCase();
+      // Match by leading step number ("1.", "1단계:") if present so updated lines overwrite the same slot.
+      const stepMatch = content.match(/^(\d+\s*(?:\.|단계))\s*/);
+      const key = stepMatch ? `stepnum:${stepMatch[1].replace(/\s+/g, '')}` : content.toLowerCase();
       const status: TodoItem['status'] =
         mark === 'x'
           ? 'completed'
@@ -192,7 +194,7 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
       map.set(key, {
         id: existing?.id || `chk-${map.size}-${key.slice(0, 20)}`,
         content,
-        status,
+        status: existing?.status === 'completed' && status === 'pending' ? 'completed' : status,
       });
     }
   }
@@ -206,9 +208,8 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
 }
 
 /**
- * Build a complete 4-stage Todo checklist right from the start of a task and
- * advance stages one by one (`pending` -> `in_progress` -> `completed`) as the
- * agent explores, edits, verifies, and finishes.
+ * Build a Todo checklist from the start of a task and advance stages one by
+ * one (`pending` -> `in_progress` -> `completed`) as the agent works.
  */
 export function deriveTodosFromTools(
   tools: RawToolLike[],
@@ -216,7 +217,38 @@ export function deriveTodosFromTools(
   busy = false,
 ): TodoItem[] {
   const checklist = parseChecklistTodos(texts, busy);
-  if (checklist.length >= 1) return checklist;
+  if (checklist.length >= 1) {
+    if (!busy) {
+      return checklist.map((item) => ({
+        ...item,
+        status: item.status === 'cancelled' ? 'cancelled' : 'completed',
+      }));
+    }
+    const explicitCompleted = checklist.filter((item) => item.status === 'completed').length;
+    if (explicitCompleted === 0 && tools.length > 0) {
+      const doneTools = tools.filter((t) => {
+        const st = String(t.status || t.state || (t.running ? 'running' : 'completed')).toLowerCase();
+        return !t.running && !st.includes('progress') && st !== 'running' && st !== 'pending';
+      }).length;
+      // Advance checklist steps proportionally as tools complete during the turn (up to N-1 while busy).
+      const autoDone = Math.min(
+        checklist.length - 1,
+        Math.floor((doneTools / Math.max(2, checklist.length * 2)) * checklist.length),
+      );
+      if (autoDone > 0) {
+        return checklist.map((item, idx) => ({
+          ...item,
+          status:
+            idx < autoDone
+              ? 'completed'
+              : idx === autoDone
+                ? 'in_progress'
+                : 'pending',
+        }));
+      }
+    }
+    return checklist;
+  }
 
   if (!busy && tools.length === 0) return [];
 
