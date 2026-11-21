@@ -6,6 +6,7 @@ import { Timeline } from './components/Timeline';
 import { Composer, type Attachment } from './components/Composer';
 import { AutoList, ContextSheet, ModelList, ReasonList, UsageSheet, type UnifiedModelGroup } from './components/Sheets';
 import { InfoPanel, type TeamTreeAgent } from './components/InfoPanel';
+import { deriveTodosFromTools } from './components/TodoBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ParallelDesk } from './components/ParallelDesk';
 import { CodexPanel, type CodexPanelState } from './components/CodexPanel';
@@ -809,7 +810,42 @@ export default function App() {
           variant={agent.model.variant}
           hasVariants={hasVariants}
           elapsed={elapsed}
-          todos={agent.todos}
+          todos={
+            agent.todos.length > 0
+              ? agent.todos
+              : deriveTodosFromTools(
+                  agent.messages.flatMap((m) =>
+                    m.info.role === 'assistant'
+                      ? m.parts.flatMap((p) => {
+                          if (p.type !== 'tool') return [];
+                          const inp = (p.state.input || {}) as Record<string, unknown>;
+                          const detail =
+                            (typeof inp.command === 'string' && inp.command) ||
+                            (typeof inp.filePath === 'string' && inp.filePath) ||
+                            (typeof inp.path === 'string' && inp.path) ||
+                            (typeof inp.query === 'string' && inp.query) ||
+                            p.tool;
+                          return [
+                            {
+                              id: p.id,
+                              tool: p.tool,
+                              detail,
+                              status: p.state.status,
+                            },
+                          ];
+                        })
+                      : [],
+                  ),
+                  agent.messages.flatMap((m) =>
+                    m.info.role === 'assistant'
+                      ? m.parts.flatMap((p) =>
+                          p.type === 'text' || p.type === 'reasoning' ? [p.text] : [],
+                        )
+                      : [],
+                  ),
+                  agent.busy,
+                ) as any
+          }
           autoApprove={agent.autoApprove}
           panel={panel}
           onPanel={setPanel}

@@ -679,6 +679,10 @@
   color: #f4f1ec;
 }
 
+.desk-log-compose > .todo-card {
+  margin-bottom: 10px;
+}
+
 .desk-icon {
   width: 34px;
   height: 34px;

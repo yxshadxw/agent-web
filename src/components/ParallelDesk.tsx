@@ -3655,14 +3655,26 @@ function LogDrawer({
   );
   const hasTranscript = agyEntries.length > 0;
   const agyBucket = useMemo(() => {
-    const buckets = (agyQuota?.groups?.flatMap((group) => group.buckets) || []).filter(
+    const groups = agyQuota?.groups || [];
+    const storedModel = agent.orcaSessionId
+      ? localStorage.getItem(`agyModel:${agent.orcaSessionId}`) || ''
+      : '';
+    const hint = `${transcript?.model || ''} ${storedModel}`.toLowerCase();
+    const preferredGroup =
+      (/argon/i.test(hint) && groups.find((g) => /argon/i.test(g.name))) ||
+      (/claude|gpt/i.test(hint) && groups.find((g) => /claude/i.test(g.name))) ||
+      groups.find((g) => /gemini\s+models/i.test(g.name));
+    const sourceBuckets = preferredGroup
+      ? preferredGroup.buckets
+      : groups.flatMap((group) => group.buckets);
+    const buckets = (sourceBuckets || []).filter(
       (bucket) => !bucket.disabled && typeof bucket.remaining === 'number',
     );
-    if (!buckets.length) return agyQuota?.groups?.[0]?.buckets?.[0] || null;
+    if (!buckets.length) return groups[0]?.buckets?.[0] || null;
     return buckets.reduce((min, bucket) =>
       (bucket.remaining ?? 100) < (min.remaining ?? 100) ? bucket : min,
     );
-  }, [agyQuota]);
+  }, [agent.orcaSessionId, agyQuota, transcript?.model]);
   const agyRemainingPct =
     typeof agyBucket?.remaining === 'number'
       ? Math.max(0, Math.min(100, agyBucket.remaining))
@@ -4824,6 +4836,18 @@ function LogDrawer({
 
         {isFreebuff && (
           <form className="desk-log-compose desk-freebuff-compose" onSubmit={sendReply}>
+            {!freebuffPanel && (() => {
+              const fbTools = freebuffSessionEntries.filter(
+                (e): e is Extract<FreebuffSessionEntry, { kind: 'tool' }> => e.kind === 'tool',
+              );
+              const fbTexts = freebuffSessionEntries.flatMap((e) =>
+                (e.kind === 'message' && e.role === 'assistant') || e.kind === 'thinking'
+                  ? [e.text]
+                  : [],
+              );
+              const fbTodos = deriveTodosFromTools(fbTools, fbTexts, isThinking);
+              return <TodoBar todos={fbTodos} onToast={notify} />;
+            })()}
             <div
               className={`desk-freebuff-compose-shell ${freebuffPanel ? 'is-expanded' : ''} ${dragActive ? 'is-dragging' : ''}`}
               onDragEnter={(event) => {
@@ -5008,13 +5032,6 @@ function LogDrawer({
                     파일을 여기에 놓아 첨부
                   </div>
                 )}
-                {!freebuffPanel && (() => {
-                  const fbTools = freebuffSessionEntries.filter(
-                    (e): e is Extract<FreebuffSessionEntry, { kind: 'tool' }> => e.kind === 'tool',
-                  );
-                  const fbTodos = deriveTodosFromTools(fbTools);
-                  return <TodoBar todos={fbTodos} onToast={notify} />;
-                })()}
             <div className="composer">
                   <input
                     ref={fileInputRef}
@@ -5151,6 +5168,19 @@ function LogDrawer({
             onDragLeave={() => setDragActive(false)}
             onDrop={dropFile}
           >
+            {!agyPickerOpen && !agyUsageOpen && (() => {
+              const agyTools = agyEntries.filter((e) => e.kind === 'tool');
+              const agyTexts = agyEntries
+                .filter(
+                  (e) =>
+                    (e.kind === 'message' && e.role === 'assistant') ||
+                    e.kind === 'thinking' ||
+                    e.kind === 'reasoning',
+                )
+                .map((e) => e.text || '');
+              const agyTodos = deriveTodosFromTools(agyTools, agyTexts, isThinking);
+              return <TodoBar todos={agyTodos} onToast={notify} />;
+            })()}
             <div className={`desk-freebuff-compose-shell ${(agyPickerOpen || agyUsageOpen) && (canPickModel || isAgyChat || isCodex || isClaude) ? 'is-expanded' : ''}`}>
             <div
               className={`desk-inline-expand ${agyUsageOpen && (isAgyChat || isCodex || isClaude) ? 'open' : ''}`}
@@ -5306,11 +5336,6 @@ function LogDrawer({
                 </button>
               </div>
             )}
-            {!agyPickerOpen && !agyUsageOpen && (() => {
-              const agyTools = agyEntries.filter((e) => e.kind === 'tool');
-              const agyTodos = deriveTodosFromTools(agyTools);
-              return <TodoBar todos={agyTodos} onToast={notify} />;
-            })()}
             <div className="composer">
               <input
                 ref={fileInputRef}
@@ -5443,11 +5468,6 @@ function LogDrawer({
         )}
         {isShell && (
           <form className="desk-log-compose" onSubmit={sendReply}>
-            {!agyPickerOpen && !agyUsageOpen && (() => {
-              const agyTools = agyEntries.filter((e) => e.kind === 'tool');
-              const agyTodos = deriveTodosFromTools(agyTools);
-              return <TodoBar todos={agyTodos} onToast={notify} />;
-            })()}
             <div className="composer">
               <span className="desk-shell-prompt">$</span>
               <textarea

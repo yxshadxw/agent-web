@@ -1101,10 +1101,15 @@ export function CodexPanel({
 
         <div className={`codex-compose ${settingsPanel ? 'settings-open' : ''}`}>
           {!settingsPanel && !statsVisible && !permissionOpen && (() => {
+            const latestAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
             const latestTools = liveTurn?.tools.length
               ? liveTurn.tools
-              : [...messages].reverse().find((m) => m.role === 'assistant' && m.tools?.length)?.tools || [];
-            const codexTodos = deriveTodosFromTools(latestTools);
+              : latestAssistant?.tools || [];
+            const latestTexts = [
+              ...(latestAssistant ? [latestAssistant.reasoning || '', latestAssistant.text || ''] : []),
+              ...(liveTurn ? [liveTurn.reasoning || '', liveTurn.text || ''] : []),
+            ];
+            const codexTodos = deriveTodosFromTools(latestTools, latestTexts, busy);
             return <TodoBar todos={codexTodos} />;
           })()}
           {settingsPanel && !statsVisible && !permissionOpen && (
