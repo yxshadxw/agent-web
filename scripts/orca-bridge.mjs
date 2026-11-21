@@ -1803,6 +1803,36 @@ async function readOrcaSessionOptions(sessionId) {
   return null;
 }
 
+function stripUserEnvelope(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) return '';
+  const lines = text.split('\n');
+  const kept = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (kept.length > 0 && kept[kept.length - 1] !== '') kept.push('');
+      continue;
+    }
+    if (/^─{3,}(?:\s*From:.*)?$/i.test(trimmed)) continue;
+    if (/^Subject:\s*\[Desk\]/i.test(trimmed)) continue;
+    if (/^\[Reply:\s*orca orchestration reply\b/i.test(trimmed)) continue;
+    if (/^\[Agent Desk 공통 지시.*\]\s*[-—:]*\s*$/i.test(trimmed)) continue;
+    if (/^\[진행 지시:.*\]\s*$/i.test(trimmed)) continue;
+    if (/^\[(워커|코디네이터|지휘자)\s*역할\]\s*$/i.test(trimmed)) continue;
+    const attachMatch = trimmed.match(/^첨부 파일:\s*(.+)$/);
+    if (attachMatch) {
+      const fileName = attachMatch[1].trim().split('/').pop() || attachMatch[1].trim();
+      kept.push(`[첨부: ${fileName}]`);
+      continue;
+    }
+    kept.push(line);
+  }
+  while (kept[0] === '') kept.shift();
+  while (kept[kept.length - 1] === '') kept.pop();
+  return kept.join('\n').trim() || text;
+}
+
 async function readTranscript(sessionId) {
   const id = typeof sessionId === 'string' ? sessionId.trim() : '';
   if (!/^[a-f0-9-]{20,64}$/i.test(id)) {
@@ -1813,6 +1843,17 @@ async function readTranscript(sessionId) {
     readOrcaSessionOptions(id),
   ]);
   const data = raw?.result || raw;
+  const rawEntries =
+    data?.agent === 'antigravity' && Array.isArray(data?.entries)
+      ? enrichAgyTools(data.entries, data?.state || '')
+      : Array.isArray(data?.entries)
+        ? data.entries
+        : [];
+  const entries = rawEntries.map((entry) =>
+    entry.kind === 'message' && entry.role === 'user' && typeof entry.text === 'string'
+      ? { ...entry, text: stripUserEnvelope(entry.text) }
+      : entry,
+  );
   return {
     ok: true,
     orcaSessionId: id,
@@ -1822,12 +1863,7 @@ async function readTranscript(sessionId) {
     state: data?.state || null,
     model: sessionOptions?.model || data?.model || null,
     effort: sessionOptions?.effort || data?.effort || null,
-    entries:
-      data?.agent === 'antigravity' && Array.isArray(data?.entries)
-        ? enrichAgyTools(data.entries, data?.state || '')
-        : Array.isArray(data?.entries)
-          ? data.entries
-          : [],
+    entries,
     limited: Boolean(data?.limited),
     fetchedAt: new Date().toISOString(),
   };

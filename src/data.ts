@@ -154,8 +154,8 @@ export function cleanUserMessage(raw: string): string {
     if (/^─{3,}(?:\s*From:.*)?$/i.test(trimmed)) continue;
     if (/^Subject:\s*\[Desk\]/i.test(trimmed)) continue;
     if (/^\[Reply:\s*orca orchestration reply\b/i.test(trimmed)) continue;
-    if (/^\[Agent Desk 공통 지시[^\]]*\]\s*[-—:]*\s*$/i.test(trimmed)) continue;
-    if (/^\[진행 지시:[^\]]*\]\s*$/i.test(trimmed)) continue;
+    if (/^\[Agent Desk 공통 지시.*\]\s*[-—:]*\s*$/i.test(trimmed)) continue;
+    if (/^\[진행 지시:.*\]\s*$/i.test(trimmed)) continue;
     if (/^\[(워커|코디네이터|지휘자)\s*역할\]\s*$/i.test(trimmed)) continue;
     const attachMatch = trimmed.match(/^첨부 파일:\s*(.+)$/);
     if (attachMatch) {

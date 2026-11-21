@@ -28,7 +28,7 @@ export function TodoBar({
   const pending = todos.find((t) => t.status === 'pending');
   const allDone = todos.length > 0 && completed === todos.length;
   const ratio = todos.length > 0 ? completed / todos.length : 0;
-  const litCount = allDone ? 3 : ratio >= 0.66 ? 2 : ratio > 0 || inProgress ? 1 : 1;
+  const litCount = allDone ? 3 : ratio >= 0.66 ? 2 : 1;
   const title =
     inProgress?.content ||
     (allDone ? '모두 끝났어요' : pending?.content || '진행 중');
@@ -79,7 +79,7 @@ export function TodoBar({
           aria-label="할 일 카드 닫기"
         >
           <X size={16} />
-                </button>
+        </button>
       </div>
       <div className="todo-body">
         <div className="todo-body-inner">
@@ -120,71 +120,53 @@ type RawToolLike = {
 function shortFileName(rawPath: string): string {
   const clean = rawPath.replace(/['"`]/g, '').trim();
   const parts = clean.split('/').filter(Boolean);
-  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
   return parts[parts.length - 1] || clean;
 }
 
-function humanizeToolStep(tool: RawToolLike): { key: string; label: string } | null {
-  if (tool.label && tool.label.trim() && !/^[/{]/.test(tool.label.trim())) {
-    const lbl = tool.label.trim();
-    return { key: `lbl:${lbl.toLowerCase()}`, label: lbl };
-  }
+type ToolPhase = 'explore' | 'edit' | 'verify' | 'finish';
+
+function classifyTool(tool: RawToolLike): { phase: ToolPhase; detailLabel?: string } {
   const kind = String(tool.tool || tool.name || '').toLowerCase();
   const raw = String(tool.command || tool.detail || '').replace(/\s+/g, ' ').trim();
 
-  // Check if this is a TodoWrite JSON payload
-  if (/todo/i.test(kind)) return null;
-
-  if (/read|view|cat|head|tail/i.test(kind) || (!kind && /^\/[\w./-]+$/.test(raw))) {
-    const file = shortFileName(raw || kind);
-    return { key: `read:${file}`, label: `${file} 코드 확인` };
-  }
   if (/edit|write|replace|patch|create/i.test(kind)) {
-    const file = shortFileName(raw || kind);
-    return { key: `edit:${file}`, label: `${file} 수정 및 구현` };
+    const file = raw && !raw.startsWith('{') ? shortFileName(raw) : '';
+    return {
+      phase: 'edit',
+      detailLabel: file ? `${file} 수정 및 기능 구현` : '코드 수정 및 기능 구현',
+    };
   }
-  if (/grep|search|glob|find|list/i.test(kind)) {
-    return { key: 'search:code', label: '관련 파일 및 구조 탐색' };
-  }
+
   if (/bash|shell|run|exec|command/i.test(kind) || raw) {
-    if (/cargo\s+test|npm\s+test|pytest|vitest|jest/i.test(raw)) {
-      return { key: 'cmd:test', label: '테스트 실행 및 검증' };
+    if (/git\s+(commit|push)|orca\s+orchestration\s+(reply|send)/i.test(raw)) {
+      return { phase: 'finish', detailLabel: '변경사항 커밋·푸시 및 결과 정리' };
     }
-    if (/cargo\s+clippy|eslint|tsc|npm\s+run\s+build|cargo\s+check|cargo\s+build/i.test(raw)) {
-      return { key: 'cmd:build', label: '빌드 및 정적 검사 확인' };
-    }
-    if (/git\s+(status|diff|log)/i.test(raw)) {
-      return { key: 'cmd:git-check', label: 'Git 변경사항 확인' };
-    }
-    if (/git\s+(commit|push)/i.test(raw)) {
-      return { key: 'cmd:git-push', label: '변경사항 커밋 및 반영' };
-    }
-    if (/^\/[\w./-]+$/.test(raw)) {
-      const file = shortFileName(raw);
-      return { key: `file:${file}`, label: `${file} 작업` };
-    }
-    const cleaned = raw
-      .replace(/^export\s+PATH=[^;&]+\s*[;&]*\s*/i, '')
-      .replace(/^cd\s+\S+\s*&&\s*/i, '')
-      .trim();
-    const shortCmd = cleaned.split(/\s+/).slice(0, 3).join(' ');
-    if (shortCmd) {
-      return { key: `cmd:${shortCmd}`, label: `${shortCmd} 실행` };
+    if (
+      /cargo\s+(test|clippy|check|build)|npm\s+(test|run\s+build)|node\s+--check|pytest|vitest|jest|tsc|playwright/i.test(
+        raw,
+      )
+    ) {
+      return { phase: 'verify', detailLabel: '빌드 및 테스트 검증' };
     }
   }
-  return null;
+
+  if (/read|view|grep|search|glob|find|list/i.test(kind)) {
+    const file = raw && /^\/[\w./-]+$/.test(raw) ? shortFileName(raw) : '';
+    return {
+      phase: 'explore',
+      detailLabel: file ? `${file} 등 코드 구조 파악` : '작업 범위 및 코드 구조 파악',
+    };
+  }
+
+  return { phase: 'explore' };
 }
 
 /**
  * Extract markdown checklist todos (`- [ ]`, `- [/]`, `- [x]`) from assistant
- * messages or thinking text so agents that create a checklist at the start of
- * a task and check items off one by one drive the TodoBar directly.
+ * messages or thinking text so agents that write a checklist drive the TodoBar.
  */
 export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
   const lineRe = /^\s*(?:[-*+]|\d+\.)\s*\[([ xX/~-])\]\s+(.+)$/;
-  // Scan from the latest text block backwards; once we find texts in the current turn
-  // that contain a checklist, merge them in chronological order so step updates
-  // (- [ ] -> - [/] -> - [x]) within the active turn override earlier states cleanly.
   const map = new Map<string, TodoItem>();
 
   for (const text of texts) {
@@ -223,8 +205,9 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
 }
 
 /**
- * Derive a clean, deduplicated, human-readable todo list from conversation
- * texts (preferring explicit markdown checklists) or tool steps.
+ * Build a complete 4-stage Todo checklist right from the start of a task and
+ * advance stages one by one (`pending` -> `in_progress` -> `completed`) as the
+ * agent explores, edits, verifies, and finishes.
  */
 export function deriveTodosFromTools(
   tools: RawToolLike[],
@@ -234,39 +217,49 @@ export function deriveTodosFromTools(
   const checklist = parseChecklistTodos(texts, busy);
   if (checklist.length >= 2) return checklist.slice(0, 8);
 
-  if (!tools.length) return checklist;
+  if (!busy && tools.length === 0) return [];
 
-  const dedup = new Map<string, TodoItem>();
-  for (let i = 0; i < tools.length; i += 1) {
-    const tool = tools[i];
-    const step = humanizeToolStep(tool);
-    if (!step) continue;
-    const state = String(
-      tool.status || tool.state || (tool.running ? 'running' : 'completed'),
-    ).toLowerCase();
-    const isRunning =
-      Boolean(tool.running) ||
-      state.includes('progress') ||
-      state === 'running' ||
-      state === 'pending';
-    const existing = dedup.get(step.key);
-    const nextStatus: TodoItem['status'] = isRunning
-      ? 'in_progress'
-      : busy && i === tools.length - 1
-        ? 'in_progress'
-        : 'completed';
-    dedup.set(step.key, {
-      id: existing?.id || tool.id || `step-${i}`,
-      content: step.label,
-      status: nextStatus === 'in_progress' ? 'in_progress' : 'completed',
-    });
+  const stages: { key: ToolPhase; label: string }[] = [
+    { key: 'explore', label: '작업 범위 및 코드 구조 파악' },
+    { key: 'edit', label: '코드 수정 및 기능 구현' },
+    { key: 'verify', label: '빌드 및 테스트 검증' },
+    { key: 'finish', label: '변경사항 반영 및 결과 정리' },
+  ];
+
+  const order: Record<ToolPhase, number> = {
+    explore: 0,
+    edit: 1,
+    verify: 2,
+    finish: 3,
+  };
+
+  let highestPhaseIdx = 0;
+  for (const tool of tools) {
+    const { phase, detailLabel } = classifyTool(tool);
+    const idx = order[phase];
+    if (detailLabel) stages[idx].label = detailLabel;
+    if (idx > highestPhaseIdx) highestPhaseIdx = idx;
   }
 
-  const list = [...dedup.values()].slice(-6);
   if (!busy) {
-    for (const item of list) {
-      if (item.status === 'in_progress') item.status = 'completed';
-    }
+    // Task finished: all 4 planned steps are completed.
+    return stages.map((stage, idx) => ({
+      id: `stage-${stage.key}-${idx}`,
+      content: stage.label,
+      status: 'completed',
+    }));
   }
-  return list;
+
+  // Task is currently running: all 4 todos exist from the start; earlier phases
+  // are completed, current phase is in_progress (yellow), later phases are pending.
+  return stages.map((stage, idx) => ({
+    id: `stage-${stage.key}-${idx}`,
+    content: stage.label,
+    status:
+      idx < highestPhaseIdx
+        ? 'completed'
+        : idx === highestPhaseIdx
+          ? 'in_progress'
+          : 'pending',
+  }));
 }
