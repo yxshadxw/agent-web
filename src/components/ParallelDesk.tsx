@@ -3385,7 +3385,14 @@ function LogDrawer({
       ),
     [agent, displayTail, freebuffSessionEntries, isFreebuff, transcriptEntries],
   );
-  const [agyPickerOpen, setAgyPickerOpen] = useState(false);
+  const [agyPickerMode, setAgyPickerMode] = useState<'model' | 'effort' | null>(null);
+  const agyPickerOpen = agyPickerMode !== null;
+  const setAgyPickerOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setAgyPickerMode((prev) => {
+      const want = typeof next === 'function' ? next(prev !== null) : next;
+      return want ? prev || 'model' : null;
+    });
+  };
   const [agyUsageOpen, setAgyUsageOpen] = useState(false);
   const [agySwitching, setAgySwitching] = useState(false);
   const switchAgyModel = async (modelId: string) => {
@@ -4569,31 +4576,87 @@ function LogDrawer({
               aria-hidden={!(agyPickerOpen && canPickModel)}
             >
               <div className="desk-inline-expand-inner">
-                <div className="inline-panel desk-agy-model-panel" role="region" aria-label="모델 선택">
+                <div
+                  className="inline-panel desk-agy-model-panel"
+                  role="region"
+                  aria-label={agyPickerMode === 'effort' ? '추론 강도 선택' : '모델 선택'}
+                >
                   <div className="inline-panel-scroll" style={{ maxHeight: 'min(52vh, 380px)', overflowY: 'auto' }}>
                     <div className="sheet-content model-sheet">
                       <div className="sheet-list">
-                        {(MODEL_OPTIONS[agent.agent] || MODEL_OPTIONS.antigravity || []).map((model) => {
-                          const selected = pickedAgyModel
-                            ? pickedAgyModel === model.id
-                            : agyModelLabel === model.label.replace(/\s*\(\w+\)\s*$/, '');
-                          return (
-                            <button
-                              type="button"
-                              key={model.id}
-                              className={`sheet-row model-row ${selected ? 'selected' : ''}`}
-                              disabled={agySwitching}
-                              onClick={() => void switchAgyModel(model.id)}
-                            >
-                              <span className="model-name">{model.label}</span>
-                            </button>
-                          );
-                        })}
+                        {(() => {
+                          const allModels = MODEL_OPTIONS[agent.agent] || MODEL_OPTIONS.antigravity || [];
+                          const stripEffort = (lbl: string) =>
+                            lbl.replace(/\s*\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i, '').trim();
+                          const extractEffort = (lbl: string) =>
+                            lbl.match(/\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i)?.[1] || '';
+
+                          if (agyPickerMode === 'effort') {
+                            const matching = allModels.filter(
+                              (m) => stripEffort(m.label) === agyModelLabel || (pickedAgyModel && stripEffort(AGY_MODEL_LABEL(pickedAgyModel)) === stripEffort(m.label)),
+                            );
+                            const effortItems = (matching.length > 0 ? matching : allModels).filter((m) => extractEffort(m.label));
+                            const list = effortItems.length > 0
+                              ? effortItems
+                              : [
+                                  { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:low`, label: `${agyModelLabel} (Low)` },
+                                  { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:medium`, label: `${agyModelLabel} (Medium)` },
+                                  { id: `${pickedAgyModel || allModels[0]?.id || 'model'}:high`, label: `${agyModelLabel} (High)` },
+                                ];
+                            return list.map((item) => {
+                              const eff = extractEffort(item.label) || item.label;
+                              const selected =
+                                (pickedAgyModel && pickedAgyModel === item.id) ||
+                                agyEffortLabel.toLowerCase() === eff.toLowerCase();
+                              return (
+                                <button
+                                  type="button"
+                                  key={item.id}
+                                  className={`sheet-row model-row ${selected ? 'selected' : ''}`}
+                                  disabled={agySwitching}
+                                  onClick={() => void switchAgyModel(item.id)}
+                                >
+                                  <span className="model-name">{eff}</span>
+                                </button>
+                              );
+                            });
+                          }
+
+                          const seen = new Map<string, ModelOption[]>();
+                          for (const m of allModels) {
+                            const base = stripEffort(m.label);
+                            const arr = seen.get(base) || [];
+                            arr.push(m);
+                            seen.set(base, arr);
+                          }
+                          return [...seen.entries()].map(([baseName, variants]) => {
+                            const selected =
+                              agyModelLabel === baseName ||
+                              variants.some((v) => v.id === pickedAgyModel);
+                            const preferred =
+                              variants.find((v) => extractEffort(v.label).toLowerCase() === agyEffortLabel.toLowerCase()) ||
+                              variants.find((v) => /medium/i.test(v.label)) ||
+                              variants[0];
+                            return (
+                              <button
+                                type="button"
+                                key={preferred.id}
+                                className={`sheet-row model-row ${selected ? 'selected' : ''}`}
+                                disabled={agySwitching}
+                                onClick={() => void switchAgyModel(preferred.id)}
+                              >
+                                <span className="model-name">{baseName}</span>
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                       <p className="desk-freebuff-panel-note">
                         {agySwitching
-                          ? '모델을 변경하는 중…'
-                          : '현재 세션에서 사용할 모델을 선택하세요.'}
+                          ? '변경하는 중…'
+                          : agyPickerMode === 'effort'
+                            ? `${agyModelLabel}의 추론 강도(effort)를 선택하세요.`
+                            : '현재 세션에서 사용할 모델을 선택하세요.'}
                       </p>
                     </div>
                   </div>
@@ -4664,28 +4727,29 @@ function LogDrawer({
               <div className="tb-center desk-agy-center">
                 <button
                   type="button"
-                  className={`tb-item model ${agyPickerOpen ? 'is-open' : ''}`}
+                  className={`tb-item model ${agyPickerMode === 'model' ? 'is-open' : ''}`}
                   onClick={() => {
                     if (!canPickModel) return;
                     setAgyUsageOpen(false);
-                    setAgyPickerOpen((open) => !open);
+                    setAgyPickerMode((mode) => (mode === 'model' ? null : 'model'));
                   }}
-                  aria-expanded={agyPickerOpen}
+                  aria-expanded={agyPickerMode === 'model'}
                 >
                   <span>{agyModelLabel}</span>
-                  {canPickModel && <ChevronDown size={12} className={`tb-chev ${agyPickerOpen ? 'flip' : ''}`} />}
+                  {canPickModel && <ChevronDown size={12} className={`tb-chev ${agyPickerMode === 'model' ? 'flip' : ''}`} />}
                 </button>
                 <button
                   type="button"
-                  className="tb-item"
+                  className={`tb-item ${agyPickerMode === 'effort' ? 'is-open' : ''}`}
                   onClick={() => {
                     if (!canPickModel) return;
                     setAgyUsageOpen(false);
-                    setAgyPickerOpen((open) => !open);
+                    setAgyPickerMode((mode) => (mode === 'effort' ? null : 'effort'));
                   }}
+                  aria-expanded={agyPickerMode === 'effort'}
                 >
                   <span>{agyEffortLabel}</span>
-                  {canPickModel && <ChevronDown size={12} className={`tb-chev ${agyPickerOpen ? 'flip' : ''}`} />}
+                  {canPickModel && <ChevronDown size={12} className={`tb-chev ${agyPickerMode === 'effort' ? 'flip' : ''}`} />}
                 </button>
               </div>
               <button

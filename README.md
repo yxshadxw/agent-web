@@ -30,6 +30,9 @@
 
 ## 설치 및 실행
 
+> **설치 팁**: 복잡한 환경 구성(의존성 설치, 브리지·터널 연결 등)은 사용 중인 코딩 에이전트에게 이 README를 참고해 설치해 달라고 맡기면 편합니다.
+> 단, **원격 접속을 열기 전에 반드시 접속 비밀번호/토큰(`.agent-web-token`, `.agent-web-auth.json`)을 먼저 본인 것으로 설정**하세요. 해당 인증 파일은 `.gitignore`에 포함되어 있어 저장소에 올라가지 않습니다.
+
 ```bash
 # 1. 저장소 클론 및 의존성 설치
 git clone https://github.com/yxshadxw/agent-web.git

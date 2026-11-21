@@ -7588,3 +7588,30 @@
   width: 15px;
   height: 15px;
 }
+
+/* Prevent mobile Safari/Android auto-zoom on input focus and improve tap responsiveness */
+button,
+[role="button"],
+a {
+  touch-action: manipulation;
+}
+
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select,
+  .composer textarea,
+  .desk-log-compose textarea {
+    font-size: 16px !important;
+  }
+}
+
+@media (min-width: 981px) {
+  .desk-main-scroll {
+    padding-inline: 28px;
+  }
+
+  .desk-log-panel {
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.45);
+  }
+}
