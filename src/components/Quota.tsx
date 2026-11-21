@@ -34,14 +34,18 @@ type UnifiedCard = {
 
 function groupLabel(name: string) {
   if (/^Gemini Models$/i.test(name)) return { provider: 'Gemini', plan: 'Google' };
-  if (/^Claude and GPT models$/i.test(name)) return { provider: 'Claude · GPT', plan: 'Agy' };
+  if (/^Claude and GPT models$/i.test(name)) return { provider: 'Agy · Claude', plan: '' };
   return { provider: name, plan: '' };
 }
 
-function windowLabel(bucket: AgyQuotaBucket) {
-  if (bucket.window === '5h') return '5시간';
-  if (bucket.window === 'weekly') return '주간';
-  return bucket.name.replace(/\s*Limit.*$/i, '') || '한도';
+function windowLabel(bucket: AgyQuotaBucket, prefix?: string) {
+  const base =
+    bucket.window === '5h'
+      ? '5시간'
+      : bucket.window === 'weekly'
+        ? '주간'
+        : bucket.name.replace(/\s*Limit.*$/i, '') || '한도';
+  return prefix ? `${prefix} · ${base}` : base;
 }
 
 function remainingLabel(bucket: AgyQuotaBucket) {
@@ -116,7 +120,7 @@ export function QuotaSection({
   activeEngine,
 }: Props) {
   const [fetchedCodex, setFetchedCodex] = useState<CodexQuotaSnapshot | null>(null);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [openId, setOpenId] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (externalCodexQuota !== undefined) return;
@@ -146,10 +150,13 @@ export function QuotaSection({
   for (const group of primaryGroups) {
     const { provider, plan } = groupLabel(group.name);
     const isGemini = /^Gemini$/i.test(provider);
-    const sections: SubSection[] = [{ buckets: group.buckets }];
+    const mergedBuckets: (AgyQuotaBucket & { prefix?: string })[] = [...group.buckets];
     if (isGemini) {
       for (const ag of argonGroups) {
-        sections.push({ title: ag.name, buckets: ag.buckets });
+        const prefix = ag.name.replace(/^Gemini\s*4\s*/i, '').trim() || 'Argon';
+        for (const b of ag.buckets) {
+          mergedBuckets.push({ ...b, prefix });
+        }
       }
     }
     cards.push({
@@ -158,7 +165,7 @@ export function QuotaSection({
       plan,
       active: isAgyActive && isGemini,
       kind: 'agy',
-      sections,
+      sections: [{ buckets: mergedBuckets }],
     });
   }
 
@@ -188,10 +195,9 @@ export function QuotaSection({
     });
   }
 
-  const isCardOpen = (card: UnifiedCard, index: number) => {
-    if (card.id in expanded) return expanded[card.id];
-    return Boolean(card.active || (index === 0 && !cards.some((c) => c.active)));
-  };
+  const activeCardId = cards.find((c) => c.active)?.id || cards[0]?.id || null;
+  const resolvedOpenId = openId === undefined ? activeCardId : openId;
+  const isCardOpen = (card: UnifiedCard) => resolvedOpenId === card.id;
 
   if (cards.length === 0 && !loading && !quota?.error) return null;
 
@@ -237,8 +243,8 @@ export function QuotaSection({
         </div>
       )}
 
-      {cards.map((card, index) => {
-        const open = isCardOpen(card, index);
+      {cards.map((card) => {
+        const open = isCardOpen(card);
         const pct = minRemaining(card.sections);
         if (!open) {
           return (
@@ -246,7 +252,7 @@ export function QuotaSection({
               type="button"
               key={card.id}
               className="sub-row"
-              onClick={() => setExpanded((prev) => ({ ...prev, [card.id]: true }))}
+              onClick={() => setOpenId(card.id)}
               aria-expanded={false}
             >
               <ChevronRight size={15} className="sub-chev" />
@@ -274,7 +280,7 @@ export function QuotaSection({
             <button
               type="button"
               className="sub-head sub-head-toggle"
-              onClick={() => setExpanded((prev) => ({ ...prev, [card.id]: false }))}
+              onClick={() => setOpenId(null)}
               aria-expanded={true}
             >
               <ChevronDown size={14} className="sub-chev" />
@@ -292,6 +298,8 @@ export function QuotaSection({
               >
                 {section.title && <div className="sub-nested-title">{section.title}</div>}
                 {section.buckets.map((bucket, bIdx) => {
+                  const prefixed = (bucket as AgyQuotaBucket & { prefix?: string }).prefix;
+                  const label = windowLabel(bucket, prefixed);
                   const critical =
                     !bucket.disabled && bucket.remaining !== null && bucket.remaining <= 10;
                   return (
@@ -302,7 +310,7 @@ export function QuotaSection({
                       key={`${card.id}-${sIdx}-${bucket.id}-${bIdx}`}
                     >
                       <div className="usage-row">
-                        <span>{windowLabel(bucket)}</span>
+                        <span>{label}</span>
                         <span className="usage-pct">{remainingLabel(bucket)}</span>
                       </div>
                       {!bucket.disabled && (
@@ -312,7 +320,7 @@ export function QuotaSection({
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-valuenow={bucket.remaining ?? 0}
-                          aria-label={`${card.provider} ${windowLabel(bucket)} ${remainingLabel(bucket)}`}
+                          aria-label={`${card.provider} ${label} ${remainingLabel(bucket)}`}
                         >
                           <span
                             className="bar-fill"
