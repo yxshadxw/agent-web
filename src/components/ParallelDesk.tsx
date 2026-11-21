@@ -102,7 +102,7 @@ const AGENT_OPTIONS = [
   { id: 'freebuff', label: 'Freebuff', short: 'FB', cls: 'freebuff' },
   { id: 'opencode', label: 'OpenCode', short: 'OC', cls: 'opencode' },
   { id: 'antigravity', label: 'Agy', short: 'AGY', cls: 'agy' },
-  { id: 'gemini', label: 'Gemini', short: 'GM', cls: 'gemini' },
+  { id: 'claude', label: 'Claude', short: 'CL', cls: 'claude' },
   { id: 'codex', label: 'Codex', short: 'CX', cls: 'codex' },
 ];
 
@@ -165,13 +165,10 @@ const MODEL_OPTIONS: Record<string, ModelOption[]> = {
     { id: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
   ],
-  gemini: [
-    { id: 'auto', label: 'Auto (권장)' },
-    { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview' },
-    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-    { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
+  claude: [
+    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   ],
   codex: [
     { id: 'gpt-6-luna-medium', label: 'GPT-6 Luna (Medium)' },
@@ -3220,11 +3217,12 @@ function LogDrawer({
   );
   const hasTranscript = agyEntries.length > 0;
   const agyBucket = useMemo(() => {
-    const buckets = agyQuota?.groups?.flatMap((group) => group.buckets) || [];
-    return (
-      buckets.find((bucket) => !bucket.disabled && typeof bucket.remaining === 'number') ||
-      buckets[0] ||
-      null
+    const buckets = (agyQuota?.groups?.flatMap((group) => group.buckets) || []).filter(
+      (bucket) => !bucket.disabled && typeof bucket.remaining === 'number',
+    );
+    if (!buckets.length) return agyQuota?.groups?.[0]?.buckets?.[0] || null;
+    return buckets.reduce((min, bucket) =>
+      (bucket.remaining ?? 100) < (min.remaining ?? 100) ? bucket : min,
     );
   }, [agyQuota]);
   const agyRemainingPct =
