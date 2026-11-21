@@ -48,6 +48,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useAgyQuota } from '../hooks/useQuota';
+import { QuotaSection } from './Quota';
 import {
   orcaApi,
   type FreebuffSessionPayload,
@@ -115,9 +116,22 @@ const AGY_MODEL_LABEL = (id: string) =>
 const MODEL_OPTIONS: Record<string, ModelOption[]> = {
   opencode: [
     { id: 'opencode/big-pickle', label: 'Big Pickle' },
-    { id: 'opencode/deepseek-v4.1-flash-free', label: 'DeepSeek V4.1 Flash' },
+    { id: 'opencode/deepseek-v4.1-flash-free', label: 'DeepSeek V4.1 Flash Free' },
+    { id: 'opencode/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash' },
+    { id: 'opencode/deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
     { id: 'opencode/beam-free', label: 'Beam' },
     { id: 'opencode/flint-40b-free', label: 'Flint 40B' },
+    { id: 'opencode/gemini-4-neon', label: 'Gemini 4 Neon' },
+    { id: 'opencode/gemini-4-hydrogen', label: 'Gemini 4 Hydrogen' },
+    { id: 'opencode/gemini-4-argon', label: 'Gemini 4 Argon' },
+    { id: 'opencode/gemini-4-carbon', label: 'Gemini 4 Carbon' },
+    { id: 'opencode/gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { id: 'opencode/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'opencode/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
+    { id: 'opencode/claude-opus-5-5', label: 'Claude Opus 5.5' },
+    { id: 'opencode/claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+    { id: 'opencode/claude-haiku-5-5', label: 'Claude Haiku 5.5' },
+    { id: 'opencode/claude-fable-5-2', label: 'Claude Fable 5.2' },
     { id: 'opencode/hy4-flash-free', label: 'HY4 Flash' },
     { id: 'opencode/iceman-free', label: 'Iceman' },
     { id: 'opencode/longcat-2.5-free', label: 'LongCat 2.5' },
@@ -159,6 +173,15 @@ const MODEL_OPTIONS: Record<string, ModelOption[]> = {
     { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
     { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
   ],
+  codex: [
+    { id: 'gpt-6-luna-medium', label: 'GPT-6 Luna (Medium)' },
+    { id: 'gpt-6-luna-high', label: 'GPT-6 Luna (High)' },
+    { id: 'gpt-6-luna-xhigh', label: 'GPT-6 Luna (XHigh)' },
+    { id: 'gpt-5.6-terra-high', label: 'GPT-5.6 Terra (High)' },
+    { id: 'gpt-5.6-terra-max', label: 'GPT-5.6 Terra (Max)' },
+    { id: 'gpt-5.6-luna-medium', label: 'GPT-5.6 Luna (Medium)' },
+    { id: 'gpt-5.6-luna-high', label: 'GPT-5.6 Luna (High)' },
+  ],
 };
 
 function modelOptions(agent: string) {
@@ -191,6 +214,8 @@ function agentMeta(id: string) {
 }
 
 const AGENT_LOGO: Record<string, string> = {
+  antigravity: '/antigravity.svg',
+  agy: '/antigravity.svg',
   freebuff: '/freebuff.svg',
   opencode: '/opencode.svg',
   gemini: '/gemini.png',
@@ -241,6 +266,31 @@ function useNotice() {
     [],
   );
   return { notice, notify };
+}
+
+function cleanAgentTitle(title?: string | null) {
+  const raw = (title || '').trim();
+  if (!raw) return '새 세션';
+  const stripped = raw
+    .replace(/^\[Agent Desk 공통 지시[^\]]*\]\s*[-—:]*\s*/i, '')
+    .replace(/^\[(워커|코디네이터|지휘자)\s*역할\]\s*/i, '')
+    .replace(/^────\s*From:[^\n]*\n?/i, '')
+    .replace(/^Subject:\s*/i, '')
+    .trim();
+  return stripped || raw;
+}
+
+function formatWorktreeName(worktree: Pick<OrcaWorktree, 'displayName' | 'branch' | 'path'>) {
+  const raw = (worktree.displayName || worktree.branch || worktree.path.split('/').pop() || 'worktree').trim();
+  return raw.replace(/^(?:orca|wt)[/_-]+/i, '') || raw;
+}
+
+function worktreeSubMeta(worktree: Pick<OrcaWorktree, 'displayName' | 'branch' | 'path'>) {
+  const title = formatWorktreeName(worktree);
+  if (worktree.branch && worktree.branch !== title && worktree.branch !== worktree.displayName) {
+    return worktree.branch;
+  }
+  return shortPath(worktree.path);
 }
 
 export function ParallelDesk({ onClose }: { onClose: () => void }) {
@@ -574,12 +624,12 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                             <span className={`desk-status-dot ${worktree.status}`} />
                             <span className="desk-worktree-main">
                               <span className="desk-worktree-name">
-                                {worktree.displayName}
+                                {formatWorktreeName(worktree)}
                                 {worktree.isMainWorktree &&
                                   worktree.displayName.toLowerCase() !== 'main' && <em>main</em>}
                               </span>
                               <span className="desk-worktree-meta">
-                                {worktree.branch || shortPath(worktree.path)}
+                                {worktreeSubMeta(worktree)}
                               </span>
                             </span>
                             {working > 0 ? (
@@ -628,7 +678,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                                   </span>
                                   <span className="desk-side-agent-main">
                                     <strong>{meta.label}</strong>
-                                    <small>{agent.title}</small>
+                                    <small>{cleanAgentTitle(agent.title)}</small>
                                   </span>
                                   {agent.role ? (
                                     <span className={`desk-role ${agent.role}`}>
@@ -722,7 +772,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
                 <div className="desk-crumb">
                   <span>{selectedWorktree?.repo || '프로젝트'}</span>
                   <ChevronRight size={13} />
-                  <strong>{selectedWorktree?.displayName || '워크트리 선택'}</strong>
+                  <strong>{selectedWorktree ? formatWorktreeName(selectedWorktree) : '워크트리 선택'}</strong>
                   {selectedWorktree?.isMainWorktree &&
                     selectedWorktree.displayName.toLowerCase() !== 'main' && <em>main</em>}
                 </div>
@@ -938,6 +988,14 @@ function AgentsTab({
       ];
       const success = launched.filter((launchResult) => launchResult.ok);
       if (success.length) {
+        const launchedModel = isSingle ? workerModel.trim() : coordinatorModel.trim();
+        if (agentType === 'antigravity' && launchedModel) {
+          for (const item of success) {
+            if (item.sessionId) {
+              localStorage.setItem(`agyModel:${item.sessionId}`, launchedModel);
+            }
+          }
+        }
         if (!blank) setPrompt('');
         notify(
           blank
@@ -956,22 +1014,11 @@ function AgentsTab({
           const launched = success[0];
           const launchedChat = launched.surface === 'chat' || launched.kind === 'chat';
           const overviewAgents = result.overview?.agents || overview?.agents || [];
-          const nextAgent =
-            overviewAgents.find(
-              (item) =>
-                (launched.sessionId && item.orcaSessionId === launched.sessionId) ||
-                (launched.handle && item.terminalHandle === launched.handle),
-            ) ||
-            (launchedChat
-              ? overviewAgents
-                  .filter(
-                    (item) =>
-                      item.kind === 'chat' &&
-                      item.agent === (launched.agent || agentType) &&
-                      item.path === (launched.path || worktree.path),
-                  )
-                  .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))[0]
-              : undefined);
+          const nextAgent = overviewAgents.find(
+            (item) =>
+              (launched.sessionId && item.orcaSessionId === launched.sessionId) ||
+              (launched.handle && item.terminalHandle === launched.handle),
+          );
           if (nextAgent) {
             onLog(nextAgent);
           } else if (launched.sessionId || (!launchedChat && launched.handle)) {
@@ -1370,9 +1417,9 @@ function AgentCard({ agent, onClick }: { agent: OrcaAgent; onClick: () => void }
         )}
         <span className={`desk-state ${agent.state}`}>{stateLabel(agent.state)}</span>
       </div>
-      <strong className="desk-agent-name">{agent.title}</strong>
-      {agent.prompt && agent.prompt !== agent.title && (
-        <p className="desk-agent-prompt">{agent.prompt}</p>
+      <strong className="desk-agent-name">{cleanAgentTitle(agent.title)}</strong>
+      {agent.prompt && cleanAgentTitle(agent.prompt) !== cleanAgentTitle(agent.title) && (
+        <p className="desk-agent-prompt">{cleanAgentTitle(agent.prompt)}</p>
       )}
       <div className="desk-agent-foot">
         <span>
@@ -2735,12 +2782,16 @@ function AgyChatThread({
   entries,
   busy,
   copied,
+  modelLabel,
+  effortLabel,
   onCopy,
   onRefresh,
 }: {
   entries: TranscriptEntry[];
   busy: boolean;
   copied: boolean;
+  modelLabel?: string;
+  effortLabel?: string;
   onCopy: () => void;
   onRefresh: () => void;
 }) {
@@ -2821,7 +2872,11 @@ function AgyChatThread({
             <RefreshCw size={14} />
           </button>
         </div>
-        <span className="meta-time">Agy · Orca chat</span>
+        <span className="meta-time">
+          {modelLabel && modelLabel !== '모델' && modelLabel !== 'Agy'
+            ? `${modelLabel}${effortLabel && effortLabel !== 'effort' ? ` · ${effortLabel}` : ''}`
+            : 'Agy · Orca chat'}
+        </span>
       </div>
     </div>
   );
@@ -3093,8 +3148,10 @@ function LogDrawer({
     (agent.kind === 'chat' ||
       (!agent.terminalHandle && Boolean(agent.orcaSessionId)));
   const isAgy = agent.agent === 'antigravity';
+  const isCodex = agent.agent === 'codex';
   const isAgyChat = isChat && isAgy;
-  const { quota: agyQuota } = useAgyQuota(isAgy);
+  const canPickModel = isAgyChat || isCodex || (MODEL_OPTIONS[agent.agent]?.length ?? 0) > 0;
+  const { quota: agyQuota, loading: agyQuotaLoading, refresh: refreshAgyQuota } = useAgyQuota(isAgy);
   const displayMeta = isOpenCode
     ? { id: 'opencode', label: 'OpenCode', short: 'OC', cls: 'opencode' }
     : isFreebuff
@@ -3125,7 +3182,7 @@ function LogDrawer({
       ),
     [transcript],
   );
-  const hasTranscript = isAgyChat ? agyEntries.length > 0 : transcriptEntries.length > 0;
+  const hasTranscript = agyEntries.length > 0;
   const agyBucket = useMemo(() => {
     const buckets = agyQuota?.groups?.flatMap((group) => group.buckets) || [];
     return (
@@ -3198,14 +3255,25 @@ function LogDrawer({
       alive = false;
     };
   }, [isAgy, agyScreen.model]);
-  const pickedAgyModel = agent.orcaSessionId
+  const [agyModelOverride, setAgyModelOverride] = useState<string | null>(null);
+  useEffect(() => {
+    setAgyModelOverride(null);
+  }, [agent.id, agent.orcaSessionId]);
+  const pickedAgyModel = agyModelOverride || (agent.orcaSessionId
     ? localStorage.getItem(`agyModel:${agent.orcaSessionId}`)
-    : null;
+    : null);
   const pickedLabel = pickedAgyModel ? AGY_MODEL_LABEL(pickedAgyModel) : null;
   const pickedEffort = pickedLabel?.match(/\((\w+)\)\s*$/)?.[1]?.toLowerCase();
   const agyModelLabel =
-    agyScreen.model || pickedLabel?.replace(/\s*\(\w+\)\s*$/, '') || agyDefault?.model || (isAgy ? 'Agy' : '');
-  const agyEffortLabel = agyScreen.effort || pickedEffort || agyDefault?.effort || 'effort';
+    pickedLabel?.replace(/\s*\(\w+\)\s*$/, '') ||
+    agyScreen.model ||
+    (!isAgyChat && isAgy ? agyDefault?.model : null) ||
+    (isCodex ? 'GPT-6 Luna' : isAgy ? '모델' : displayMeta.label);
+  const agyEffortLabel =
+    pickedEffort ||
+    agyScreen.effort ||
+    (!isAgyChat && isAgy ? agyDefault?.effort : null) ||
+    (isCodex ? 'medium' : 'effort');
   // A chat stays a chat even if Orca also exposes a terminal handle for it.
   const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking = transcript ? transcript.state === 'working' : agent.state === 'working';
@@ -3318,39 +3386,19 @@ function LogDrawer({
     [agent, displayTail, freebuffSessionEntries, isFreebuff, transcriptEntries],
   );
   const [agyPickerOpen, setAgyPickerOpen] = useState(false);
+  const [agyUsageOpen, setAgyUsageOpen] = useState(false);
   const [agySwitching, setAgySwitching] = useState(false);
-  // Orca fixes an Agy chat's model at launch, so switching starts a fresh chat
-  // on the same worktree with the new model and carries the handoff brief over.
   const switchAgyModel = async (modelId: string) => {
     if (agySwitching) return;
     setAgySwitching(true);
     setSendError(null);
     try {
-      const result = await orcaApi.launch({
-        path: agent.path,
-        prompt: `${handoffBrief}\n\n모델을 바꿔 이어서 진행합니다. 위 맥락을 이어받아 계속해 주세요.`,
-        agent: 'antigravity',
-        count: 1,
-        isolate: false,
-        team: false,
-        workerModel: modelId,
-        coordinatorModel: '',
-      });
-      const launched = result.launches.find((item) => item.ok);
-      if (!launched) throw new Error(result.launches[0]?.error || '모델을 바꾸지 못했어요.');
-      const agents = result.overview?.agents || [];
-      const next =
-        agents.find((item) => launched.sessionId && item.orcaSessionId === launched.sessionId) ||
-        agents
-          .filter((item) => item.kind === 'chat' && item.agent === 'antigravity' && item.path === agent.path)
-          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-      notify(`${AGY_MODEL_LABEL(modelId)}(으)로 새 채팅을 열었어요`);
+      if (agent.orcaSessionId) {
+        localStorage.setItem(`agyModel:${agent.orcaSessionId}`, modelId);
+      }
+      setAgyModelOverride(modelId);
+      notify(`${AGY_MODEL_LABEL(modelId)}(으)로 모델을 변경했어요`);
       setAgyPickerOpen(false);
-      const sid = launched.sessionId || next?.orcaSessionId;
-      if (sid) localStorage.setItem(`agyModel:${sid}`, modelId);
-      if (next && next.id !== agent.id) onContinue(next);
-    } catch (cause) {
-      setSendError(cause instanceof Error ? cause.message : '모델을 바꾸지 못했어요.');
     } finally {
       setAgySwitching(false);
     }
@@ -3406,21 +3454,24 @@ function LogDrawer({
       if (agent.orcaSessionId) {
         void orcaApi
           .transcript(agent.orcaSessionId)
-          .then(setTranscript)
+          .then((next) => {
+            if (token === loadTokenRef.current) setTranscript(next);
+          })
           .catch(() => undefined);
       }
       if (isFreebuff) {
         void orcaApi
           .freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined)
-          .then((next) =>
+          .then((next) => {
+            if (token !== loadTokenRef.current) return;
             setFreebuffSession((current) =>
               current &&
               current.updatedAt === next.updatedAt &&
               current.entries.length === next.entries.length
                 ? current
                 : next,
-            ),
-          )
+            );
+          })
           .catch(() => undefined);
       }
       if (agent.terminalHandle) {
@@ -3429,9 +3480,11 @@ function LogDrawer({
             screen: !isFreebuff,
             limit: isFreebuff ? 5000 : 800,
           });
+          if (token !== loadTokenRef.current) return;
           setSnapshot(next);
           setError(null);
         } catch (cause) {
+          if (token !== loadTokenRef.current) return;
           setError(cause instanceof Error ? cause.message : '로그를 읽지 못했어요.');
         }
       }
@@ -3479,7 +3532,7 @@ function LogDrawer({
     // A Freebuff terminal can keep running after Orca's transcript stops
     // updating. Prefer the live terminal for it; the user can still switch
     // back to the last Orca transcript with the toggle.
-    setView(isFreebuff || isShell ? 'terminal' : 'chat');
+    setView(isShell ? 'terminal' : 'chat');
   }, [isFreebuff, isShell, agent.terminalHandle]);
 
   useEffect(() => {
@@ -3539,7 +3592,7 @@ function LogDrawer({
 
   const copy = async () => {
     if (!snapshot && !hasTranscript) return;
-    const copyEntries = isAgyChat ? agyEntries : transcriptEntries;
+    const copyEntries = agyEntries;
     const copyText =
       view === 'chat' && hasTranscript
         ? copyEntries
@@ -3752,7 +3805,7 @@ function LogDrawer({
           ].slice(-FREEBUFF_SENT_LIMIT),
         );
       }
-      setView(isFreebuff || isShell ? 'terminal' : 'chat');
+      setView(isShell ? 'terminal' : 'chat');
       window.setTimeout(() => setSent(false), 1600);
       const refresh = () => {
         if (agent.orcaSessionId) {
@@ -3858,7 +3911,7 @@ function LogDrawer({
                 {agent.role && (
                   <em className={`desk-role ${agent.role}`}>{roleLabel(agent.role)}</em>
                 )}
-                {isFreebuff ? agentLabel : agent.title}
+                {isFreebuff ? agentLabel : cleanAgentTitle(agent.title)}
               </strong>
               <span>
                 {isFreebuff
@@ -3893,11 +3946,11 @@ function LogDrawer({
             >
               <ArrowRightLeft size={15} />
             </button>
-            {isFreebuff && (
+            {agent.terminalHandle && (
               <button
                 className="desk-icon"
                 onClick={() => void interrupt()}
-                disabled={interrupting || !agent.terminalHandle}
+                disabled={interrupting}
                 title={interrupted ? '중단됨' : '현재 작업 중단 (Ctrl+C)'}
                 aria-label={interrupted ? '중단됨' : '현재 작업 중단'}
               >
@@ -4000,7 +4053,7 @@ function LogDrawer({
           </div>
         ) : (
           <div
-            className={`desk-log-body ${isAgyChat ? 'desk-agy-log-body' : ''}`}
+            className={`desk-log-body ${view === 'chat' && hasTranscript ? 'desk-agy-log-body' : ''}`}
             ref={bodyRef}
             onScroll={(event) => {
               const el = event.currentTarget;
@@ -4008,41 +4061,15 @@ function LogDrawer({
             }}
           >
             {view === 'chat' && hasTranscript ? (
-              isAgyChat ? (
-                <AgyChatThread
-                  entries={agyEntries}
-                  busy={isThinking}
-                  copied={copied}
-                  onCopy={() => void copy()}
-                  onRefresh={() => void load()}
-                />
-              ) : (
-                <div className="desk-transcript">
-                  {transcriptEntries.map((entry, index) => {
-                    const thinking = entry.kind === 'reasoning' || entry.kind === 'thinking';
-                    const tool = entry.kind === 'tool';
-                    return (
-                      <article
-                        className={`desk-transcript-entry ${
-                          entry.role === 'user'
-                            ? 'user'
-                            : thinking
-                              ? 'thinking'
-                              : tool
-                                ? 'tool'
-                                : 'assistant'
-                        }`}
-                        key={`${entry.kind}-${entry.role || 'entry'}-${index}`}
-                      >
-                        <span>
-                          {entry.role === 'user' ? 'YOU' : thinking ? 'THINKING' : tool ? 'TOOL' : 'AGENT'}
-                        </span>
-                        <TranscriptMarkdown text={entry.text || ''} />
-                      </article>
-                    );
-                  })}
-                </div>
-              )
+              <AgyChatThread
+                entries={agyEntries}
+                busy={isThinking}
+                copied={copied}
+                modelLabel={agyModelLabel}
+                effortLabel={agyEffortLabel}
+                onCopy={() => void copy()}
+                onRefresh={() => void load()}
+              />
             ) : isChat ? (
               <div className="desk-loading">
                 {loading ? <Loader2 size={17} className="spin" /> : <MessageSquare size={17} />}
@@ -4495,7 +4522,7 @@ function LogDrawer({
             )}
           </form>
         )}
-        {isChat && (
+        {!isFreebuff && !isShell && (
           <form
             className={`desk-log-compose desk-agy-compose ${dragActive ? 'is-dragging' : ''}`}
             onSubmit={sendReply}
@@ -4506,32 +4533,73 @@ function LogDrawer({
             onDragLeave={() => setDragActive(false)}
             onDrop={dropFile}
           >
-            {agyPickerOpen && isAgyChat && (
-              <div className="inline-panel desk-agy-model-panel" role="region" aria-label="Agy 모델 선택">
-                <div className="inline-panel-scroll" style={{ maxHeight: 260, overflowY: 'auto' }}>
-                  <div className="sheet-content model-sheet">
-                    <div className="sheet-list">
-                      {(MODEL_OPTIONS.antigravity || []).map((model) => (
+            <div className={`desk-freebuff-compose-shell ${(agyPickerOpen || agyUsageOpen) && (canPickModel || isAgyChat) ? 'is-expanded' : ''}`}>
+            <div
+              className={`desk-inline-expand ${agyUsageOpen && isAgyChat ? 'open' : ''}`}
+              aria-hidden={!(agyUsageOpen && isAgyChat)}
+            >
+              <div className="desk-inline-expand-inner">
+                <div className="inline-panel desk-freebuff-inline-panel desk-agy-usage-panel" role="region" aria-label="Agy 사용량">
+                  <div className="inline-panel-scroll" style={{ maxHeight: 'min(62vh, 440px)', overflowY: 'auto' }}>
+                    <section className="desk-freebuff-usage usage-sheet">
+                      <div className="sheet-head">
+                        <span className="sheet-title">사용량 한도</span>
+                        <span className="sheet-sub">{agyModelLabel}</span>
                         <button
                           type="button"
-                          key={model.id}
-                          className={`sheet-row model-row ${agyModelLabel === model.label ? 'selected' : ''}`}
-                          disabled={agySwitching}
-                          onClick={() => void switchAgyModel(model.id)}
+                          className="sheet-close"
+                          onClick={() => setAgyUsageOpen(false)}
+                          aria-label="Agy 사용량 패널 닫기"
                         >
-                          <span className="model-name">{model.label}</span>
+                          <X size={15} />
                         </button>
-                      ))}
-                    </div>
-                    <p className="desk-freebuff-panel-note">
-                      {agySwitching
-                        ? '새 채팅을 여는 중…'
-                        : '모델은 세션 시작 시 정해져서, 선택하면 같은 워크트리에 맥락을 이어받은 새 채팅이 열립니다.'}
-                    </p>
+                      </div>
+                      <QuotaSection
+                        quota={agyQuota}
+                        loading={agyQuotaLoading}
+                        onRefresh={() => void refreshAgyQuota()}
+                      />
+                    </section>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
+            <div
+              className={`desk-inline-expand ${agyPickerOpen && canPickModel ? 'open' : ''}`}
+              aria-hidden={!(agyPickerOpen && canPickModel)}
+            >
+              <div className="desk-inline-expand-inner">
+                <div className="inline-panel desk-agy-model-panel" role="region" aria-label="모델 선택">
+                  <div className="inline-panel-scroll" style={{ maxHeight: 'min(52vh, 380px)', overflowY: 'auto' }}>
+                    <div className="sheet-content model-sheet">
+                      <div className="sheet-list">
+                        {(MODEL_OPTIONS[agent.agent] || MODEL_OPTIONS.antigravity || []).map((model) => {
+                          const selected = pickedAgyModel
+                            ? pickedAgyModel === model.id
+                            : agyModelLabel === model.label.replace(/\s*\(\w+\)\s*$/, '');
+                          return (
+                            <button
+                              type="button"
+                              key={model.id}
+                              className={`sheet-row model-row ${selected ? 'selected' : ''}`}
+                              disabled={agySwitching}
+                              onClick={() => void switchAgyModel(model.id)}
+                            >
+                              <span className="model-name">{model.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="desk-freebuff-panel-note">
+                        {agySwitching
+                          ? '모델을 변경하는 중…'
+                          : '현재 세션에서 사용할 모델을 선택하세요.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
             {attachment && (
               <div className="desk-log-attachment">
                 <FileText size={13} />
@@ -4587,6 +4655,7 @@ function LogDrawer({
                 {sending ? <Loader2 size={15} className="spin" /> : <ArrowUp size={17} />}
               </button>
             </div>
+            </div>
             <div className="toolbar desk-agy-toolbar">
               <span className="tb-item desk-agy-auto" title="자동 실행 모드">
                 <ShieldCheck size={14} />
@@ -4596,27 +4665,42 @@ function LogDrawer({
                 <button
                   type="button"
                   className={`tb-item model ${agyPickerOpen ? 'is-open' : ''}`}
-                  onClick={() => isAgyChat && setAgyPickerOpen((open) => !open)}
+                  onClick={() => {
+                    if (!canPickModel) return;
+                    setAgyUsageOpen(false);
+                    setAgyPickerOpen((open) => !open);
+                  }}
                   aria-expanded={agyPickerOpen}
                 >
-                  <span>{isAgyChat ? agyModelLabel : displayMeta.label}</span>
-                  {isAgyChat && <ChevronDown size={12} className={`tb-chev ${agyPickerOpen ? 'flip' : ''}`} />}
+                  <span>{agyModelLabel}</span>
+                  {canPickModel && <ChevronDown size={12} className={`tb-chev ${agyPickerOpen ? 'flip' : ''}`} />}
                 </button>
                 <button
                   type="button"
                   className="tb-item"
-                  onClick={() => isAgyChat && setAgyPickerOpen(true)}
+                  onClick={() => {
+                    if (!canPickModel) return;
+                    setAgyUsageOpen(false);
+                    setAgyPickerOpen((open) => !open);
+                  }}
                 >
-                  <span>{isAgyChat ? agyEffortLabel : 'Orca'}</span>
-                  {isAgyChat && <ChevronDown size={12} className="tb-chev" />}
+                  <span>{agyEffortLabel}</span>
+                  {canPickModel && <ChevronDown size={12} className={`tb-chev ${agyPickerOpen ? 'flip' : ''}`} />}
                 </button>
               </div>
-              <span
-                className="tb-item timer"
+              <button
+                type="button"
+                className={`tb-item timer ${agyUsageOpen ? 'is-open' : ''}`}
+                onClick={() => {
+                  if (!isAgyChat) return;
+                  setAgyPickerOpen(false);
+                  setAgyUsageOpen((open) => !open);
+                }}
+                aria-expanded={agyUsageOpen}
                 title={
                   isAgyChat
                     ? `${agyModelLabel} · ${agyUsageText}${agyTimeLabel ? ` · ${agyTimeLabel} 후 리셋` : ''}`
-                    : 'Orca 채팅'
+                    : displayMeta.label
                 }
               >
                 <span
@@ -4626,9 +4710,9 @@ function LogDrawer({
                   }}
                 />
                 <span>
-                  {isAgyChat ? agyTimeLabel || agyRemainingLabel : 'chat'}
+                  {isAgyChat ? agyTimeLabel || agyRemainingLabel : isChat ? '채팅' : '실시간'}
                 </span>
-              </span>
+              </button>
             </div>
             {sendError && (
               <div className="desk-log-compose-error">

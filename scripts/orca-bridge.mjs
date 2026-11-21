@@ -25,7 +25,7 @@ const ORCA_TIMEOUT = 30_000;
 const MAX_BODY = 1_000_000;
 const MAX_ATTACHMENT_BODY = 30 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-const ATTACHMENT_DIR = join(tmpdir(), 'agent-web-attachments');
+const ATTACHMENT_DIR = join(homedir(), '.orca', 'agent-web-attachments');
 const CACHE_MS = 2_500;
 const FREEBUFF_SESSION_MESSAGE_LIMIT = 80;
 const FREEBUFF_SESSION_ENTRY_LIMIT = 1_000;
@@ -203,7 +203,7 @@ function normalizeAgent(agent, worktree, terminal, index) {
     agent?.prompt ||
     '이름 없는 에이전트';
   const prompt = String(agent?.prompt || '').trimStart();
-  const roleSource = `${prompt}\n${String(agent?.title || '').trimStart()}`;
+  const roleSource = `${prompt}\n${String(agent?.title || '').trimStart()}\n${String(title || '').trimStart()}`;
   const role = prompt.startsWith('[워커 역할]')
     ? 'worker'
     : prompt.startsWith('[코디네이터 역할]') || prompt.startsWith('[지휘자 역할]')
@@ -269,9 +269,9 @@ function normalizeWorktree(raw, flatAgents, terminalMap) {
     .filter(
       (agent) =>
         agent.terminalHandle ||
+        agent.orcaSessionId ||
         agent.state === 'working' ||
-        agent.state === 'waiting' ||
-        (agent.kind === 'chat' && Boolean(agent.role)),
+        agent.state === 'waiting',
     );
 
   agents.sort((a, b) => {
@@ -1696,9 +1696,9 @@ function launchSessionId(result) {
 }
 
 function launchSurface(agent) {
-  // Agy's native Orca surface is a chat. Terminal surface is what made a
-  // parallel Agy launch show up as a raw CLI and kept its transcript empty.
-  return agent === 'antigravity' ? 'chat' : 'terminal';
+  return agent === 'antigravity' || agent === 'codex' || agent === 'claude'
+    ? 'chat'
+    : 'terminal';
 }
 
 function cleanModel(value) {
@@ -1824,8 +1824,12 @@ async function launchAgents(body) {
   // In team mode the app opens only one coordinator session. The worker
   // headcount is passed in the coordinator prompt; the coordinator opens and
   // manages any worker sessions it actually needs.
-  const workerPrompt = blank ? '' : agentPrompt(prompt);
-  const workerLaunches = team ? 0 : count;
+  const workerPrompt = blank
+    ? ''
+    : team
+      ? `[워커 역할]\n${COMMON_RULES}\n\n코디네이터의 지시를 기다리며 대기해. 직접 작업을 시작하지 말고 코디네이터가 orca orchestration send로 지시하면 그때 진행해.`
+      : agentPrompt(prompt);
+  const workerLaunches = count;
   const launches = [];
   for (let index = 0; index < workerLaunches; index += 1) {
     try {
@@ -1862,7 +1866,7 @@ async function launchAgents(body) {
     const workerSurface = launchSurface(agent);
     const workerTarget =
       workerSurface === 'chat' ? 'orca_session_id:<세션 ID>' : '<terminal handle>';
-    const coordinatorPrompt = `[코디네이터 역할]\n${COMMON_RULES}\n\n너는 이 팀의 코디네이터다. 앱은 워커 세션을 미리 열지 않았다. 워커 정원은 ${count}명이다. 작업을 ${count}명이 나눠 맡을 수 있는 범위로 설계하고, 각 범위의 담당·완료 조건·검증 방법을 정한 뒤 실행과 취합을 지휘해.\n워커 세션이 필요하면 현재 워크트리에서 \`orca agent launch --agent ${agent} --worktree path:$(pwd) --prompt \"...\" --surface ${workerSurface} --json\`로 직접 띄워. ${workerSurface === 'chat' ? '채팅 세션이면 `orca agent list --worktree path:$(pwd) --json`에서 그 세션의 orcaSessionId를 확인해 `orca_session_id:<id>` 형식으로' : '터미널 세션이면 반환된 terminal handle을'} \`orca orchestration send --to ${workerTarget} --subject \"...\" --body \"...\" --type status --json\`의 대상으로 넣어 지휘해. 워커를 띄울 때는 프롬프트 첫 줄에 반드시 [워커 역할] 표식을 넣어. 직접 파일을 수정하기보다 분배·검증·취합에 집중해.\n\n[전체 작업]\n${prompt}`;
+    const coordinatorPrompt = `[코디네이터 역할]\n${COMMON_RULES}\n\n너는 이 팀의 최종 코디네이터다. 다른 코디네이터에게 보고하지 말고, 워커 취합 후 사용자에게 직접 결과를 보고해. 앱은 워커 세션을 미리 열지 않았다. 워커 정원은 ${count}명이다. 작업을 ${count}명이 나눠 맡을 수 있는 범위로 설계하고, 각 범위의 담당·완료 조건·검증 방법을 정한 뒤 실행과 취합을 지휘해.\n워커 세션이 필요하면 현재 워크트리에서 \`orca agent launch --agent ${agent} --worktree path:$(pwd) --prompt \"...\" --surface ${workerSurface} --json\`로 직접 띄워. ${workerSurface === 'chat' ? '채팅 세션이면 `orca agent list --worktree path:$(pwd) --json`에서 그 세션의 orcaSessionId를 확인해 `orca_session_id:<id>` 형식으로' : '터미널 세션이면 반환된 terminal handle을'} \`orca orchestration send --to ${workerTarget} --subject \"...\" --body \"...\" --type status --json\`의 대상으로 넣어 지휘해. 워커를 띄울 때는 프롬프트 첫 줄에 반드시 [워커 역할] 표식을 넣어. 직접 파일을 수정하기보다 분배·검증·취합에 집중해.\n\n[전체 작업]\n${prompt}`;
     try {
       coordinator = await launchOne({
         worktree,
