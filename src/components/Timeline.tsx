@@ -32,7 +32,14 @@ import {
 } from 'lucide-react';
 import type { AssistantMessageInfo, MessageWithParts, PermissionRequest } from '../lib/api';
 import { engineLabel, getEngine } from '../lib/engine';
-import { fmtDuration, formatTokens, timeLabel, type PinnedFile } from '../data';
+import {
+  cleanUserMessage,
+  fmtDuration,
+  formatTokens,
+  highlightQuotaWarningsHtml,
+  timeLabel,
+  type PinnedFile,
+} from '../data';
 import { BrandGlyph } from './Brand';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 
@@ -177,7 +184,7 @@ function UserMessage({
     (part): part is TextPart => part.type === 'text' && !part.synthetic && !part.ignored,
   );
   const files = message.parts.filter((part): part is FilePart => part.type === 'file');
-  const text = texts.map((part) => part.text).join('\n\n');
+  const text = cleanUserMessage(texts.map((part) => part.text).join('\n\n'));
 
   const copy = async () => {
     try {
@@ -412,10 +419,12 @@ function ReasoningBlock({
 function MarkdownText({ text, streaming }: { text: string; streaming: boolean }) {
   const html = useMemo(() => {
     const rendered = marked.parse(text) as string;
-    return DOMPurify.sanitize(rendered, {
-      ADD_ATTR: ['target'],
-      FORBID_TAGS: ['style', 'form', 'input'],
-    });
+    return highlightQuotaWarningsHtml(
+      DOMPurify.sanitize(rendered, {
+        ADD_ATTR: ['target'],
+        FORBID_TAGS: ['style', 'form', 'input'],
+      }),
+    );
   }, [text]);
 
   return (

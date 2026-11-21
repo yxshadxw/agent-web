@@ -24,13 +24,14 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { formatTokens } from '../data';
+import { cleanUserMessage, formatTokens, highlightQuotaWarningsHtml } from '../data';
 import type { AgentProvider } from '../lib/api';
 import { switchEngine, type AgentEngine } from '../lib/engine';
 import { useAgyQuota } from '../hooks/useQuota';
 import { BrandGlyph } from './Brand';
 import { AutoList } from './Sheets';
 import { QuotaSection } from './Quota';
+import { TodoBar, deriveTodosFromTools } from './TodoBar';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import { SelectMenu } from './SelectMenu';
 
@@ -125,7 +126,9 @@ function CodexMarkdown({
     <div
       className={className}
       dangerouslySetInnerHTML={{
-        __html: DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input'] }),
+        __html: highlightQuotaWarningsHtml(
+          DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input'] }),
+        ),
       }}
     />
   );
@@ -846,7 +849,7 @@ export function CodexPanel({
             if (message.role === 'user') {
               return (
                 <div className="bubble-row user codex-agy-user" key={message.id}>
-                  <div className="bubble user">{message.text}</div>
+                  <div className="bubble user">{cleanUserMessage(message.text)}</div>
                 </div>
               );
             }
@@ -1097,6 +1100,13 @@ export function CodexPanel({
         )}
 
         <div className={`codex-compose ${settingsPanel ? 'settings-open' : ''}`}>
+          {!settingsPanel && !statsVisible && !permissionOpen && (() => {
+            const latestTools = liveTurn?.tools.length
+              ? liveTurn.tools
+              : [...messages].reverse().find((m) => m.role === 'assistant' && m.tools?.length)?.tools || [];
+            const codexTodos = deriveTodosFromTools(latestTools);
+            return <TodoBar todos={codexTodos} />;
+          })()}
           {settingsPanel && !statsVisible && !permissionOpen && (
             <div
               className={`inline-panel codex-settings-panel ${settingsClosing ? 'is-closing' : ''}`}

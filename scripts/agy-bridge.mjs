@@ -8,15 +8,32 @@
  */
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const extraPathDirs = [
+  join(homedir(), '.npm-global', 'bin'),
+  join(homedir(), '.local', 'bin'),
+  join(homedir(), '.config', 'orca', 'cli', 'bin'),
+].filter((dir) => existsSync(dir));
+if (extraPathDirs.length) {
+  process.env.PATH = [...extraPathDirs, process.env.PATH || ''].filter(Boolean).join(':');
+}
 
 const ROOT = resolve(
   process.env.AGENT_WEB_WORKDIR || dirname(dirname(fileURLToPath(import.meta.url))),
 );
 const PORT = Number(process.env.AGY_BRIDGE_PORT || 4098);
-const AGY_BIN = process.env.AGY_BIN || 'agy';
+const AGY_BIN =
+  process.env.AGY_BIN ||
+  [
+    join(homedir(), '.npm-global', 'bin', 'agy'),
+    join(homedir(), '.local', 'bin', 'agy'),
+  ].find((candidate) => existsSync(candidate)) ||
+  'agy';
 const STATE_DIR = join(ROOT, '.agent-web');
 const STATE_FILE = join(STATE_DIR, 'agy-state.json');
 const MAX_BODY = 24 * 1024 * 1024;
@@ -717,7 +734,15 @@ async function getAgyQuota(force = false) {
       if (error) {
         rejectPromise(error);
       } else {
-        quotaCache = { at: now(), data };
+        const isPartial = Array.isArray(data?.groups) && data.groups.length < 2;
+        const hadFuller = Array.isArray(quotaCache?.data?.groups) && quotaCache.data.groups.length >= 2;
+        if (isPartial && hadFuller) {
+          resolvePromise({ ...quotaCache.data, cached: true });
+          return;
+        }
+        if (!isPartial) {
+          quotaCache = { at: now(), data };
+        }
         resolvePromise({ ...data, cached: false });
       }
     };

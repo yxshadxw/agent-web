@@ -61,6 +61,7 @@ import { InfoPanel, type TeamTreeAgent } from './InfoPanel';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import {
   orcaApi,
+  type FreebuffSessionEntry,
   type FreebuffSessionPayload,
   type GithubInfo,
   type GithubWorkflow,
@@ -77,7 +78,16 @@ import {
   type TranscriptPayload,
   type WorktreeDiffPayload,
 } from '../lib/orca';
-import { relativeTime, shortPath, type InfoTab, type PinnedFile } from '../data';
+import {
+  cleanUserMessage,
+  highlightQuotaWarningsHtml,
+  isQuotaWarningLine,
+  relativeTime,
+  shortPath,
+  type InfoTab,
+  type PinnedFile,
+} from '../data';
+import { TodoBar, deriveTodosFromTools } from './TodoBar';
 import { Sheet } from './Sheet';
 import { SelectMenu } from './SelectMenu';
 
@@ -2530,10 +2540,12 @@ function TranscriptMarkdown({
 }) {
   const html = useMemo(
     () =>
-      DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }) as string, {
-        ADD_ATTR: ['target'],
-        FORBID_TAGS: ['style', 'form', 'input'],
-      }),
+      highlightQuotaWarningsHtml(
+        DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }) as string, {
+          ADD_ATTR: ['target'],
+          FORBID_TAGS: ['style', 'form', 'input'],
+        }),
+      ),
     [text],
   );
   return <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
@@ -2999,7 +3011,10 @@ function TerminalBlockContent({ block }: { block: TerminalBlock }) {
         <div className="desk-term-block-label">THINKING</div>
       )}
       {block.lines.map((line, index) => (
-        <div className={`desk-term-line ${block.kind}`} key={`${index}-${line.slice(0, 18)}`}>
+        <div
+          className={`desk-term-line ${block.kind} ${isQuotaWarningLine(line) ? 'quota-warn' : ''}`}
+          key={`${index}-${line.slice(0, 18)}`}
+        >
           {line || '\u00a0'}
         </div>
       ))}
@@ -3259,7 +3274,7 @@ function AgyChatThread({
         if (group.kind === 'user') {
           return (
             <div className="desk-agy-user" key={`user-${index}`}>
-              {group.text}
+              {cleanUserMessage(group.text)}
             </div>
           );
         }
@@ -3972,10 +3987,22 @@ function LogDrawer({
       // terminal read. Waiting for the terminal first made the chat pane lag a
       // full round-trip behind the live session while Freebuff was working.
       if (agent.orcaSessionId) {
+        const expectedSessionId = agent.orcaSessionId;
         void orcaApi
-          .transcript(agent.orcaSessionId)
+          .transcript(expectedSessionId)
           .then((next) => {
-            if (token === loadTokenRef.current) setTranscript(next);
+            if (token !== loadTokenRef.current) return;
+            if (next.orcaSessionId && next.orcaSessionId !== expectedSessionId) return;
+            setTranscript((current) => {
+              if (
+                current &&
+                current.entries.length > 0 &&
+                (!next.entries || next.entries.length === 0)
+              ) {
+                return current;
+              }
+              return next;
+            });
           })
           .catch(() => undefined);
       }
@@ -3984,22 +4011,51 @@ function LogDrawer({
         const since = sinceKey
           ? Number(localStorage.getItem(`sessionSince:${sinceKey}`) || 0) || undefined
           : undefined;
+        const lockedChat = sinceKey
+          ? localStorage.getItem(`boundChat:${sinceKey}`) || undefined
+          : undefined;
         void orcaApi
           .freebuffSession(
             agent.path,
             isOpenCode ? 'opencode' : undefined,
             since,
             agent.terminalHandle || undefined,
+            lockedChat,
           )
           .then((next) => {
             if (token !== loadTokenRef.current) return;
-            setFreebuffSession((current) =>
-              current &&
-              current.updatedAt === next.updatedAt &&
-              current.entries.length === next.entries.length
+            if (next.ok && next.chatId && sinceKey) {
+              try {
+                localStorage.setItem(`boundChat:${sinceKey}`, next.chatId);
+              } catch {
+                // ignore
+              }
+            }
+            setFreebuffSession((current) => {
+              if (
+                current &&
+                current.ok &&
+                current.entries.length > 0 &&
+                (!next.ok || next.entries.length === 0)
+              ) {
+                return current;
+              }
+              if (
+                current &&
+                current.ok &&
+                current.chatId &&
+                next.chatId &&
+                current.chatId !== next.chatId &&
+                current.entries.length > 0
+              ) {
+                return current;
+              }
+              return current &&
+                current.updatedAt === next.updatedAt &&
+                current.entries.length === next.entries.length
                 ? current
-                : next,
-            );
+                : next;
+            });
           })
           .catch(() => undefined);
       }
@@ -4046,11 +4102,21 @@ function LogDrawer({
   /* keep the transcript fresh even when the terminal read is slow */
   useEffect(() => {
     if (!agent.orcaSessionId) return;
+    const expectedSessionId = agent.orcaSessionId;
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         void orcaApi
-          .transcript(agent.orcaSessionId!)
-          .then(setTranscript)
+          .transcript(expectedSessionId)
+          .then((next) => {
+            if (next.orcaSessionId && next.orcaSessionId !== expectedSessionId) return;
+            setTranscript((current) =>
+              current &&
+              current.entries.length > 0 &&
+              (!next.entries || next.entries.length === 0)
+                ? current
+                : next,
+            );
+          })
           .catch(() => undefined);
       }
     }, 900);
@@ -4337,12 +4403,7 @@ function LogDrawer({
       setView(isShell ? 'terminal' : 'chat');
       window.setTimeout(() => setSent(false), 1600);
       const refresh = () => {
-        if (agent.orcaSessionId) {
-          void orcaApi.transcript(agent.orcaSessionId).then(setTranscript).catch(() => undefined);
-        }
-        if (isFreebuff) {
-          void orcaApi.freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined).then(setFreebuffSession).catch(() => undefined);
-        }
+        void load();
       };
       window.setTimeout(refresh, 700);
       window.setTimeout(refresh, 2200);
@@ -4627,7 +4688,7 @@ function LogDrawer({
                         if (entry.role === 'user') {
                           return (
                             <article className="desk-freebuff-msg" key={`fb-session-${index}`}>
-                              <p>{entry.text}</p>
+                              <p>{cleanUserMessage(entry.text)}</p>
                               {entry.at && (
                                 <div className="desk-freebuff-msg-meta">
                                   <time>{entry.at}</time>
@@ -4936,7 +4997,14 @@ function LogDrawer({
                     파일을 여기에 놓아 첨부
                   </div>
                 )}
-                <div className="composer">
+                {!freebuffPanel && (() => {
+                  const fbTools = freebuffSessionEntries.filter(
+                    (e): e is Extract<FreebuffSessionEntry, { kind: 'tool' }> => e.kind === 'tool',
+                  );
+                  const fbTodos = deriveTodosFromTools(fbTools);
+                  return <TodoBar todos={fbTodos} onToast={notify} />;
+                })()}
+            <div className="composer">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -5227,6 +5295,11 @@ function LogDrawer({
                 </button>
               </div>
             )}
+            {!agyPickerOpen && !agyUsageOpen && (() => {
+              const agyTools = agyEntries.filter((e) => e.kind === 'tool');
+              const agyTodos = deriveTodosFromTools(agyTools);
+              return <TodoBar todos={agyTodos} onToast={notify} />;
+            })()}
             <div className="composer">
               <input
                 ref={fileInputRef}
@@ -5359,6 +5432,11 @@ function LogDrawer({
         )}
         {isShell && (
           <form className="desk-log-compose" onSubmit={sendReply}>
+            {!agyPickerOpen && !agyUsageOpen && (() => {
+              const agyTools = agyEntries.filter((e) => e.kind === 'tool');
+              const agyTodos = deriveTodosFromTools(agyTools);
+              return <TodoBar todos={agyTodos} onToast={notify} />;
+            })()}
             <div className="composer">
               <span className="desk-shell-prompt">$</span>
               <textarea

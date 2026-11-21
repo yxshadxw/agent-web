@@ -343,9 +343,9 @@ export const orcaApi = {
     ),
   transcript: (sessionId: string) =>
     request<TranscriptPayload>(`/transcript?sessionId=${encodeURIComponent(sessionId)}`),
-  freebuffSession: (path: string, kind?: string, since?: number, handle?: string) =>
+  freebuffSession: (path: string, kind?: string, since?: number, handle?: string, chat?: string) =>
     request<FreebuffSessionPayload>(
-      `/freebuff/session?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}${since ? `&since=${since}` : ''}${handle ? `&handle=${encodeURIComponent(handle)}` : ''}`,
+      `/freebuff/session?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}${since ? `&since=${since}` : ''}${handle ? `&handle=${encodeURIComponent(handle)}` : ''}${chat ? `&chat=${encodeURIComponent(chat)}` : ''}`,
     ),
   models: (agent: string) =>
     request<{ ok: boolean; models: { id: string; label: string }[] }>(

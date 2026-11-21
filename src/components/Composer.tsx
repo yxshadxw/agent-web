@@ -2,9 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Todo } from '@opencode-ai/sdk';
 import {
   ArrowUp,
-  Check,
   ChevronDown,
-  ChevronUp,
   Loader2,
   Plus,
   ShieldCheck,
@@ -13,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { fmtClock, type ComposerPanel } from '../data';
+import { TodoBar } from './TodoBar';
 
 export type Attachment = {
   mime: string;
@@ -67,8 +66,6 @@ export function Composer({
   remainingPct,
   remainingLabel,
 }: Props) {
-  const [todosVisible, setTodosVisible] = useState(true);
-  const [todosOpen, setTodosOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -124,10 +121,7 @@ export function Composer({
     };
   }, [panel, onPanel]);
 
-  const completed = todos.filter((todo) => todo.status === 'completed').length;
-  const inProgress = todos.find((todo) => todo.status === 'in_progress');
-  const allDone = todos.length > 0 && completed === todos.length;
-  const todoTitle = inProgress?.content || (allDone ? '모두 끝났어요' : '할 일');
+      {!panel && <TodoBar todos={todos} onToast={onToast} />}
 
   const addFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -202,64 +196,7 @@ export function Composer({
         addFiles(event.dataTransfer.files);
       }}
     >
-      {!panel && todos.length > 0 && todosVisible && (
-        <div className={`todo-card ${todosOpen ? 'expanded' : ''}`}>
-          <div className="todo-head">
-            <button
-              className="todo-summary"
-              onClick={() => setTodosOpen((value) => !value)}
-              aria-expanded={todosOpen}
-            >
-              <span className="todo-bars" aria-hidden="true">
-                <i className={allDone ? 'done' : 'active'} />
-                <i className={allDone ? 'done' : 'active'} />
-                <i className={allDone ? 'done' : 'active'} />
-              </span>
-              <span className="todo-title">{todoTitle}</span>
-              <span className="todo-count">
-                {completed} / {todos.length}
-              </span>
-            </button>
-            <button
-              className="todo-mini"
-              onClick={() => setTodosOpen((value) => !value)}
-              aria-label={todosOpen ? '할 일 접기' : '할 일 펼치기'}
-            >
-              <ChevronUp size={16} className={`chev ${todosOpen ? 'flip' : ''}`} />
-            </button>
-            <button
-              className="todo-mini"
-              onClick={() => {
-                setTodosVisible(false);
-                onToast('할 일 카드를 숨겼어요');
-              }}
-              aria-label="할 일 카드 닫기"
-            >
-              <X size={16} />
-            </button>
-          </div>
-          <div className="todo-body">
-            <div className="todo-body-inner">
-              <ul>
-                {todos.map((todo) => (
-                  <li key={todo.id} className={`todo-item status-${todo.status}`}>
-                    <span className={`todo-check status-${todo.status}`}>
-                      {todo.status === 'completed' ? (
-                        <Check size={11} strokeWidth={3} />
-                      ) : todo.status === 'in_progress' ? (
-                        <Loader2 size={11} className="spin" />
-                      ) : todo.status === 'cancelled' ? (
-                        <X size={11} />
-                      ) : null}
-                    </span>
-                    <span>{todo.content}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
+      {!panel && <TodoBar todos={todos} onToast={onToast} />}
 
       {!panel && attachments.length > 0 && (
         <div className="attach-tray">

@@ -1357,12 +1357,13 @@ function opencodeEntries(messages) {
   return entries;
 }
 
-async function readOpencodeSession(rawPath, since = 0, handle = '') {
+async function readOpencodeSession(rawPath, since = 0, handle = '', requestedChat = '') {
   const worktree = await resolveWorktreePath(rawPath);
   const dir = encodeURIComponent(worktree.path);
   const { body: list } = await fetchJson(`${OPENCODE_URL}/session?directory=${dir}`, {});
   const launchAt = (handle ? terminalLaunchAt.get(handle) : 0) || since || 0;
-  const boundId = handle ? terminalHandleChat.get(handle) : '';
+  if (handle && requestedChat) terminalHandleChat.set(handle, requestedChat);
+  const boundId = requestedChat || (handle ? terminalHandleChat.get(handle) : '');
   const allSessions = (Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [])
     .filter((x) => x.directory === worktree.path && !x.parentID)
     .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
@@ -1474,6 +1475,7 @@ async function readFreebuffSession(rawPath, requestedChat, since = 0, handle = '
   const boundChatId = !requestedChat && handle ? terminalHandleChat.get(handle) : '';
   const effectiveChat = requestedChat || boundChatId || '';
   if (effectiveChat) {
+    if (handle) terminalHandleChat.set(handle, effectiveChat);
     const chat = findFreebuffChat(projectDir, effectiveChat);
     return parseFreebuffFile(chat);
   }
@@ -1562,6 +1564,26 @@ function agyToolDetail(call) {
   };
 }
 
+function extractAgyNeedle(rawText) {
+  const text = String(rawText || '').replace(/\[image\]/g, '').trim();
+  if (!text) return '';
+  const msgIdMatch = text.match(/--id\s+(msg_[A-Za-z0-9]+)/);
+  if (msgIdMatch) return msgIdMatch[1];
+  const bodyLines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line &&
+        !/^─{3,}/i.test(line) &&
+        !/^Subject:\s*\[Desk\]/i.test(line) &&
+        !/^\[Reply:\s*orca orchestration/i.test(line) &&
+        !/^첨부 파일:/i.test(line) &&
+        !/^\[(?:Agent Desk 공통 지시|워커 역할|코디네이터 역할)/i.test(line),
+    );
+  return (bodyLines.join(' ').trim() || text).slice(0, 80);
+}
+
 // Orca's Agy transcript only says `execute`. Recover the real commands from the
 // Agy CLI's own transcript for the matching conversation.
 function enrichAgyTools(entries, state = '') {
@@ -1569,7 +1591,7 @@ function enrichAgyTools(entries, state = '') {
     const toolEntries = entries.filter((e) => e.kind === 'tool');
     if (!existsSync(AGY_BRAIN_DIR)) return entries;
     const lastUser = [...entries].reverse().find((e) => e.role === 'user' && e.text)?.text || '';
-    const needle = lastUser.replace(/\[image\]/g, '').trim().slice(0, 80);
+    const needle = extractAgyNeedle(lastUser);
     const candidates = readdirSync(AGY_BRAIN_DIR)
       .map((id) => join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl'))
       .filter((f) => existsSync(f))
@@ -2540,8 +2562,9 @@ async function route(req, res) {
     try {
       const since = Number(url.searchParams.get('since') || 0) || 0;
       const handle = url.searchParams.get('handle') || '';
+      const chat = url.searchParams.get('chat') || '';
       if (url.searchParams.get('kind') === 'opencode') {
-        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || '', since, handle));
+        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || '', since, handle, chat));
         return;
       }
       json(
@@ -2549,7 +2572,7 @@ async function route(req, res) {
         200,
         await readFreebuffSession(
           url.searchParams.get('path') || '',
-          url.searchParams.get('chat') || '',
+          chat,
           since,
           handle,
         ),

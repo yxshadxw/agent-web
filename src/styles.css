@@ -2199,6 +2199,18 @@ pre {
   text-size-adjust: 100%;
 }
 
+.quota-warn-inline,
+.desk-term-line.quota-warn {
+  display: inline-block;
+  padding: 5px 9px;
+  margin: 3px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 92, 92, 0.45);
+  background: rgba(255, 72, 72, 0.14);
+  color: #ff6b6b !important;
+  font-weight: 600;
+}
+
 .ghost-btn {
   align-self: flex-start;
   padding: 8px 12px;
