@@ -138,10 +138,16 @@ async function runCommand(bin, args, { cwd, timeout = 30_000 } = {}) {
 }
 
 async function runOrca(args, timeout = ORCA_TIMEOUT) {
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.ORCA_SESSION_ID;
+  delete cleanEnv.ORCA_AGENT_SESSION_ID;
+  delete cleanEnv.ORCA_TERMINAL_HANDLE;
+  delete cleanEnv.ORCA_RUN_ID;
+  delete cleanEnv.ORCA_DISPATCH_ID;
   try {
     const { stdout, stderr } = await execFileAsync(ORCA_BIN, args, {
       cwd: process.cwd(),
-      env: process.env,
+      env: cleanEnv,
       timeout,
       maxBuffer: 64 * 1024 * 1024,
       windowsHide: true,
@@ -826,11 +832,15 @@ async function sendDeskMessage(body) {
     delivered: false,
   };
 
+  const fromHandle = source
+    ? source.terminalHandle || (source.orcaSessionId ? `orca_session_id:${source.orcaSessionId}` : '')
+    : 'agent-desk';
   try {
     await runOrca(
       [
         'orchestration',
         'send',
+        ...(fromHandle ? ['--from', fromHandle] : []),
         '--subject',
         subject,
         '--body',
