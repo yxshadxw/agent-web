@@ -95,6 +95,8 @@ const CODEX_MODELS = [
   { value: 'gpt-6-luna', label: 'GPT-6 Luna', description: '범용 코딩 · 현재 CLI 기본', meta: '272k' },
   { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: '긴 작업 · 최대 effort', meta: '272k' },
   { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', description: '빠른 코딩', meta: '272k' },
+];
+const CLAUDE_MODELS = [
   { value: 'claude:claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Claude Code CLI', meta: '200k' },
   { value: 'claude:claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Claude Code CLI', meta: '200k' },
   { value: 'claude:claude-haiku-4-5', label: 'Claude Haiku 4.5', description: 'Claude Code CLI', meta: '200k' },
@@ -312,6 +314,11 @@ export function CodexPanel({
   const [localStatsOpen, setLocalStatsOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [liveTurn, setLiveTurn] = useState<{
+    reasoning: string;
+    tools: CodexTool[];
+    text: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [copiedMessage, setCopiedMessage] = useState<string | null>(null);
@@ -336,7 +343,16 @@ export function CodexPanel({
   const remainingContext = usage
     ? Math.max(0, usage.contextWindow - usage.context)
     : CONTEXT_WINDOW;
-  const selectedModel = CODEX_MODELS.find((option) => option.value === model) || CODEX_MODELS[0];
+  const minQuotaRemaining = (() => {
+    const windows = [quota?.primary, quota?.secondary].filter(
+      (w): w is CodexQuotaWindow => Boolean(w && typeof w.usedPercent === 'number'),
+    );
+    if (!windows.length) return null;
+    return Math.max(0, Math.min(...windows.map((w) => Math.round(100 - w.usedPercent))));
+  })();
+  const selectedModel =
+    [...CODEX_MODELS, ...CLAUDE_MODELS].find((option) => option.value === model) ||
+    CODEX_MODELS[0];
   const selectedEffort = CODEX_EFFORTS.find((option) => option.value === effort) || CODEX_EFFORTS[1];
   const elapsedLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
 
@@ -415,6 +431,11 @@ export function CodexPanel({
       })
       .finally(() => setQuotaLoading(false));
   };
+
+  useEffect(() => {
+    loadQuota();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (statsVisible) loadQuota();
@@ -547,6 +568,7 @@ export function CodexPanel({
     }
     setError(null);
     setBusy(true);
+    setLiveTurn({ reasoning: '', tools: [], text: '' });
     setElapsed(0);
     const started = Date.now();
     window.clearInterval(timerRef.current);
@@ -560,9 +582,15 @@ export function CodexPanel({
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({ prompt, threadId, model, effort, autoApprove }),
+        body: JSON.stringify({ prompt, threadId, model, effort, autoApprove, stream: true }),
       });
-      const data = (await response.json().catch(() => ({}))) as {
+      if (!response.ok) {
+        const errBody = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error || `Codex 요청에 실패했어요 (${response.status})`);
+      }
+
+      type StreamPayload = {
+        type?: 'progress' | 'done' | 'error';
         ok?: boolean;
         text?: string;
         reasoning?: string;
@@ -571,8 +599,49 @@ export function CodexPanel({
         usage?: Record<string, number>;
         error?: string;
       };
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error || `Codex 요청에 실패했어요 (${response.status})`);
+      let data: StreamPayload | null = null;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/x-ndjson') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const rawLine = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!rawLine) continue;
+            try {
+              const ev = JSON.parse(rawLine) as StreamPayload;
+              if (generation !== generationRef.current) return;
+              if (ev.type === 'progress') {
+                if (ev.threadId) setThreadId(ev.threadId);
+                setLiveTurn({
+                  reasoning: ev.reasoning || '',
+                  tools: Array.isArray(ev.tools) ? ev.tools : [],
+                  text: ev.text || '',
+                });
+              } else if (ev.type === 'done') {
+                data = ev;
+              } else if (ev.type === 'error') {
+                throw new Error(ev.error || 'Codex 요청에 실패했어요.');
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof Error && parseErr.message !== 'Unexpected end of JSON input') {
+                if ((parseErr as { name?: string }).name !== 'SyntaxError') throw parseErr;
+              }
+            }
+          }
+        }
+      } else {
+        data = (await response.json().catch(() => ({}))) as StreamPayload;
+      }
+
+      if (!data || data.ok === false) {
+        throw new Error(data?.error || `Codex 요청에 실패했어요 (${response.status})`);
       }
       if (generation !== generationRef.current) return;
       if (data.threadId) setThreadId(data.threadId);
@@ -612,7 +681,10 @@ export function CodexPanel({
     } finally {
       window.clearInterval(timerRef.current);
       if (abortRef.current === controller) abortRef.current = null;
-      if (generation === generationRef.current) setBusy(false);
+      if (generation === generationRef.current) {
+        setLiveTurn(null);
+        setBusy(false);
+      }
     }
   };
 
@@ -779,13 +851,29 @@ export function CodexPanel({
           })}
 
           {busy && (
-            <div className="bubble-row agent bubble-in codex-agy-typing" role="status">
-              <span className="agent-dot" />
-              <div className="bubble agent typing">
-                <Loader2 size={14} className="spin" />
-                <span>생각하는 중…</span>
-              </div>
-            </div>
+            <article className="codex-agy-turn" role="status">
+              {(liveTurn?.reasoning || !liveTurn?.text) && (
+                <CodexThinking
+                  text={liveTurn?.reasoning || '생각하는 중…'}
+                  busy={!liveTurn?.text}
+                />
+              )}
+              {liveTurn && liveTurn.tools.length > 0 && (
+                <div className="tools codex-agy-tools">
+                  {liveTurn.tools.map((tool, index) => (
+                    <CodexToolRow
+                      key={`live-${tool.id || tool.type}-${index}`}
+                      tool={tool}
+                    />
+                  ))}
+                </div>
+              )}
+              {liveTurn?.text && (
+                <div className="assistant-text">
+                  <CodexMarkdown text={liveTurn.text} className="md" />
+                </div>
+              )}
+            </article>
           )}
 
           {!busy && !error && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
@@ -1021,7 +1109,7 @@ export function CodexPanel({
                 {settingsPanel === 'model' ? (
                   <div className="sheet-content model-sheet">
                     <div className="sheet-head">
-                      <span className="sheet-title">Codex · Claude</span>
+                      <span className="sheet-title">Codex</span>
                       <span className="sheet-sub">{CODEX_MODELS.length}개</span>
                     </div>
                     <div className="sheet-list">
@@ -1029,6 +1117,26 @@ export function CodexPanel({
                         <button
                           type="button"
                           key={option.value || 'default'}
+                          className={`sheet-row model-row ${option.value === model ? 'selected' : ''}`}
+                          onClick={() => {
+                            setModel(option.value);
+                            closeSettings();
+                          }}
+                        >
+                          <span className="model-name">{option.label}</span>
+                          <span className="row-provider">{option.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="sheet-head">
+                      <span className="sheet-title">Claude Code</span>
+                      <span className="sheet-sub">{CLAUDE_MODELS.length}개</span>
+                    </div>
+                    <div className="sheet-list">
+                      {CLAUDE_MODELS.map((option) => (
+                        <button
+                          type="button"
+                          key={option.value}
                           className={`sheet-row model-row ${option.value === model ? 'selected' : ''}`}
                           onClick={() => {
                             setModel(option.value);
@@ -1222,12 +1330,16 @@ export function CodexPanel({
             >
               <span
                 className="timer-ring"
-                title={`컨텍스트 ${Math.round(contextPct)}%`}
+                title={
+                  minQuotaRemaining !== null
+                    ? `남은 한도 ${minQuotaRemaining}%`
+                    : `컨텍스트 ${Math.round(contextPct)}%`
+                }
                 style={{
-                  background: `conic-gradient(#f2763a 0 ${contextPct}%, #35251e ${contextPct}% 360deg)`,
+                  background: `conic-gradient(#f2763a 0 ${minQuotaRemaining ?? Math.round(contextPct)}%, #35251e ${minQuotaRemaining ?? Math.round(contextPct)}% 360deg)`,
                 }}
               />
-              <span>{elapsedLabel}</span>
+              <span>{minQuotaRemaining !== null ? `${minQuotaRemaining}%` : elapsedLabel}</span>
             </button>
           </div>
         </div>

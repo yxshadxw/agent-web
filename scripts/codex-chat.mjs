@@ -194,6 +194,13 @@ function runClaude(prompt, threadId, root, options = {}) {
             });
           }
         }
+        options.onProgress?.({
+          threadId: resolvedThread,
+          text: text.trim(),
+          reasoning: reasoning.trim(),
+          tools: [...toolsById.values()],
+          usage,
+        });
       }
       if (event.type === 'result') {
         if (typeof event.result === 'string' && event.result.trim()) text = event.result;
@@ -204,6 +211,12 @@ function runClaude(prompt, threadId, root, options = {}) {
         }
       }
     };
+    if (options.signal) {
+      options.signal.addEventListener('abort', () => {
+        child.kill('SIGTERM');
+        finish(new Error('요청이 중단되었습니다.'));
+      }, { once: true });
+    }
     child.stdout.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       const lines = buffer.split('\n');
@@ -345,7 +358,27 @@ function runCodex(prompt, threadId, root, options = {}) {
       }
       if (event.type === 'turn.completed' && event.usage) usage = event.usage;
       if (event.type === 'error') failure = event.message || event.error?.message || 'Codex 오류';
+      if (
+        event.type === 'item.started' ||
+        event.type === 'item.updated' ||
+        event.type === 'item.completed' ||
+        event.type === 'thread.started'
+      ) {
+        options.onProgress?.({
+          threadId: resolvedThread,
+          text: text.trim(),
+          reasoning: reasoning.trim(),
+          tools: [...toolsById.values()],
+          usage,
+        });
+      }
     };
+    if (options.signal) {
+      options.signal.addEventListener('abort', () => {
+        child.kill('SIGTERM');
+        finish(new Error('요청이 중단되었습니다.'));
+      }, { once: true });
+    }
 
     child.stdout.on('data', (chunk) => {
       buffer += chunk.toString();
@@ -527,21 +560,55 @@ export function createCodexHandler({ root, workingRoot = process.cwd() }) {
         return send(res, 400, { ok: false, error: '메시지가 너무 깁니다.' });
       }
       busy = true;
+      const stream = Boolean(body?.stream);
+      const abortController = new AbortController();
+      req.on('close', () => {
+        if (!res.writableEnded) abortController.abort();
+      });
+      if (stream) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('X-Accel-Buffering', 'no');
+      }
       try {
         const result = await runCodex(prompt, threadId, workingRoot || root, {
           model,
           autoApprove,
           effort,
+          signal: abortController.signal,
+          onProgress: stream
+            ? (snap) => {
+                if (!res.writableEnded) {
+                  res.write(`${JSON.stringify({ type: 'progress', ...snap })}\n`);
+                }
+              }
+            : undefined,
         });
-        return send(res, 200, {
+        const finalPayload = {
           ok: true,
           ...result,
           text:
             result.text ||
             result.reasoning ||
             'Codex가 작업을 완료했지만 표시할 텍스트 응답이 없습니다.',
-        });
+        };
+        if (stream) {
+          if (!res.writableEnded) {
+            res.write(`${JSON.stringify({ type: 'done', ...finalPayload })}\n`);
+            res.end();
+          }
+          return;
+        }
+        return send(res, 200, finalPayload);
       } catch (error) {
+        if (stream) {
+          if (!res.writableEnded) {
+            res.write(`${JSON.stringify({ type: 'error', error: error.message })}\n`);
+            res.end();
+          }
+          return;
+        }
         return send(res, 502, { ok: false, error: error.message });
       } finally {
         busy = false;

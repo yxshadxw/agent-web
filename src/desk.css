@@ -7680,3 +7680,50 @@ a {
   gap: 2px;
   margin-top: 2px;
 }
+
+/* Unified model picker hierarchy & selected highlight */
+.model-sheet .sheet-head {
+  margin: 10px 4px 4px;
+  padding: 5px 10px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.model-sheet .sheet-head:first-child {
+  margin-top: 2px;
+}
+
+.model-sheet .sheet-head .sheet-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.model-sheet .sheet-head .sheet-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.model-sheet .sheet-row.selected,
+.inline-panel .model-row.selected,
+.sheet-content .sheet-row.model-row.selected {
+  background: rgba(242, 118, 58, 0.14);
+  border: 1px solid rgba(242, 118, 58, 0.36);
+  color: #ffffff;
+}
+
+.model-sheet .sheet-row.selected .model-name,
+.inline-panel .model-row.selected .model-name {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.model-sheet .sheet-row.selected .row-provider,
+.inline-panel .model-row.selected .row-provider {
+  color: #f4b494;
+}
+
+.codex-panel .tb-item.timer .timer-ring {
+  animation: none;
+}
