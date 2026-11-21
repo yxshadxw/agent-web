@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { diffLines } from 'diff';
+import { Check, Copy } from 'lucide-react';
 
 type DiffProps = {
   oldText?: string;
@@ -35,6 +37,7 @@ export function hasDiffSignal(text?: string) {
 }
 
 export function ToolDiff({ oldText, newText, rawDiff, fileName }: DiffProps) {
+  const [copied, setCopied] = useState(false);
   let lines: LineItem[] = [];
 
   if (typeof oldText === 'string' && typeof newText === 'string') {
@@ -57,10 +60,29 @@ export function ToolDiff({ oldText, newText, rawDiff, fileName }: DiffProps) {
 
   if (!lines.length) return null;
 
+  const copyDiff = async () => {
+    try {
+      await navigator.clipboard.writeText(lines.map((l) => l.text).join('\n'));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
+
   return (
     <div className="tool-diff-wrap">
-      <div className="tool-detail-label">
-        변경 사항{fileName ? ` · ${fileName.split('/').pop()}` : ''}
+      <div className="tool-detail-label tool-diff-head">
+        <span>변경 사항{fileName ? ` · ${fileName.split('/').pop()}` : ''}</span>
+        <button
+          type="button"
+          className="tool-diff-copy"
+          onClick={() => void copyDiff()}
+          aria-label="변경 사항 복사"
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          <span>{copied ? '복사됨' : '복사'}</span>
+        </button>
       </div>
       <pre className="tool-diff">
         {lines.map((item, idx) => (

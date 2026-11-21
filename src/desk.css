@@ -7782,3 +7782,48 @@ a {
 .diff-line.diff-ctx {
   color: var(--muted);
 }
+
+.tool-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tool-diff-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.tool-diff-copy:hover {
+  border-color: rgba(242, 118, 58, 0.45);
+  color: var(--text);
+}
+
+.tool.real.open {
+  border-color: rgba(242, 118, 58, 0.28);
+}
+
+.codex-panel .composer,
+.desk-freebuff-compose-shell {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.suggestion {
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.14s ease;
+}
+
+.suggestion:hover {
+  border-color: rgba(242, 118, 58, 0.4);
+  transform: translateY(-1px);
+}
