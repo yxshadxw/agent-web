@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 
 export function authPath(root = process.cwd()) {
@@ -25,8 +26,9 @@ export function ensureAuth(root = process.cwd()) {
     // fall through and create a local credential file
   }
 
+  const defaultUser = process.env.USER?.trim() || userInfo().username || 'admin';
   const auth = {
-    username: 'yxshadxw',
+    username: defaultUser,
     password: randomBytes(12).toString('base64url'),
   };
   writeFileSync(authPath(root), `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });

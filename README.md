@@ -72,7 +72,10 @@ npm run preview
 | `ORCA_BRIDGE_PORT` | `4099` | Orca(`orca-bridge.mjs`) 브리지 포트 |
 | `AGENT_WEB_WORKDIR` | 현재 작업 디렉터리 | 브리지 기본 작업 경로 |
 
-> **인증 안내**: 외부(원격 브라우저 등)에서 접속할 때는 `scripts/auth.mjs`가 생성하는 인증 토큰(`.agent-web-token`, `.agent-web-auth.json`)을 통해 로그인합니다. 인증 파일은 저장소에 커밋하지 마세요.
+> **인증 및 계정 안내**:
+> - 클론 후 실행하면 **실행한 사용자 본인의 OS 계정·GitHub CLI(`gh`)·로컬 에이전트 계정(`agy`, `codex`, `claude`, `opencode`, `freebuff`, `orca`)을 자동으로 불러옵니다.**
+> - GitHub 탭·PR·push 연동이 필요하면 실행 PC에서 먼저 `gh auth login`으로 본인 GitHub 계정에 로그인하세요.
+> - 외부에서 웹으로 접속할 때는 `scripts/auth.mjs`가 생성하는 인증 파일(`.agent-web-token`, `.agent-web-auth.json`) 또는 `AGENT_WEB_USERNAME` / `AGENT_WEB_PASSWORD` 환경 변수를 사용합니다. 인증 파일은 저장소에 커밋하지 마세요.
 
 ---
 

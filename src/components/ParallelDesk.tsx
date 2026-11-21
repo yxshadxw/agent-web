@@ -1566,10 +1566,15 @@ function GithubTab({ path, notify }: { path: string; notify: (message: string) =
           </span>
           <h2>{info.slug}</h2>
           <p>{info.path}</p>
-          {info.account?.login && (
+          {info.account?.login ? (
             <div className="desk-github-account" title={info.account.url || undefined}>
               <Github size={11} />
               @{info.account.login} 연결됨
+            </div>
+          ) : (
+            <div className="desk-github-account" title="로컬 터미널에서 gh auth login 실행 후 새로고침하세요">
+              <Github size={11} />
+              GitHub 미연결 · 터미널에서 gh auth login 필요
             </div>
           )}
         </div>
@@ -5308,7 +5313,7 @@ function AddProjectDialog({
           <input
             value={path}
             onChange={(event) => setPath(event.target.value)}
-            placeholder="/home/ubuntu/my-project"
+            placeholder="~/my-project"
             autoFocus
             spellCheck={false}
           />

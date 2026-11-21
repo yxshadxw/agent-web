@@ -63,8 +63,7 @@ export function formatTokens(value: number) {
 
 export function shortPath(value?: string | null) {
   if (!value) return '~';
-  const home = '/home/ubuntu';
-  const path = value.startsWith(home) ? `~${value.slice(home.length)}` : value;
+  const path = value.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, '~');
   if (path.length <= 42) return path;
   const parts = path.split('/');
   return `${parts.slice(0, 2).join('/')}/…/${parts.slice(-2).join('/')}`;
