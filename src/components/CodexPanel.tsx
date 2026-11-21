@@ -298,7 +298,7 @@ export function CodexPanel({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [settingsPanel]);
   const [effort, setEffort] = useState(initial.current.effort ?? 'medium');
   const [autoApprove, setAutoApprove] = useState(Boolean(initial.current.autoApprove));
   const [permissionOpen, setPermissionOpen] = useState(false);

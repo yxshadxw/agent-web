@@ -956,6 +956,9 @@ function AgentsTab({
     setWorkerModel('');
     setCoordinatorModel('');
     setModelTarget(null);
+  }, [agentType]);
+
+  useEffect(() => {
     let alive = true;
     void orcaApi
       .models(agentType)
@@ -972,7 +975,7 @@ function AgentsTab({
     return () => {
       alive = false;
     };
-  }, [agentType]);
+  }, [agentType, worktree.path, modelTarget]);
 
   const launchModelOptions = useMemo(() => {
     const base = modelOptions(agentType);
@@ -3430,6 +3433,22 @@ function LogDrawer({
     [agent, displayTail, freebuffSessionEntries, isFreebuff, transcriptEntries],
   );
   const [agyPickerMode, setAgyPickerMode] = useState<'model' | 'effort' | null>(null);
+  const [liveDrawerModels, setLiveDrawerModels] = useState<ModelOption[]>([]);
+  useEffect(() => {
+    if (!agyPickerMode) return;
+    let alive = true;
+    void orcaApi
+      .models(agent.agent)
+      .then((res) => {
+        if (alive && res.ok && Array.isArray(res.models)) {
+          setLiveDrawerModels(res.models);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [agent.agent, agyPickerMode]);
   const agyPickerOpen = agyPickerMode !== null;
   const setAgyPickerOpen = (next: boolean | ((prev: boolean) => boolean)) => {
     setAgyPickerMode((prev) => {
@@ -4676,7 +4695,11 @@ function LogDrawer({
                     <div className="sheet-content model-sheet">
                       <div className="sheet-list">
                         {(() => {
-                          const allModels = MODEL_OPTIONS[agent.agent] || MODEL_OPTIONS.antigravity || [];
+                          const baseModels = MODEL_OPTIONS[agent.agent] || MODEL_OPTIONS.antigravity || [];
+                          const seenLive = new Set(liveDrawerModels.map((m) => m.id));
+                          const allModels = liveDrawerModels.length
+                            ? [...liveDrawerModels, ...baseModels.filter((m) => !seenLive.has(m.id))]
+                            : baseModels;
                           const stripEffort = (lbl: string) =>
                             lbl.replace(/\s*\((Low|Medium|High|XHigh|Max|Ultra)\)\s*$/i, '').trim();
                           const extractEffort = (lbl: string) =>

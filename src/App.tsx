@@ -100,7 +100,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [agent.auth, codexMode, engine]);
+  }, [agent.auth, codexMode, engine, panel]);
 
   const unifiedModelGroups = useMemo<UnifiedModelGroup[]>(() => {
     const groups: UnifiedModelGroup[] = [];

@@ -187,9 +187,6 @@ async function runCommand(bin, args, { cwd, timeout = 30_000 } = {}) {
 const modelListCache = new Map();
 
 async function listAgentModels(agentName) {
-  const cached = modelListCache.get(agentName);
-  if (cached && Date.now() - cached.at < 60_000) return cached.models;
-
   let models = [];
   if (agentName === 'antigravity' || agentName === 'agy') {
     const { stdout } = await execFileAsync('agy', ['models'], { timeout: 15_000 });
