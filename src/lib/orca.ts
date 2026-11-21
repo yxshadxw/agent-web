@@ -330,9 +330,9 @@ export const orcaApi = {
     ),
   transcript: (sessionId: string) =>
     request<TranscriptPayload>(`/transcript?sessionId=${encodeURIComponent(sessionId)}`),
-  freebuffSession: (path: string, kind?: string, since?: number) =>
+  freebuffSession: (path: string, kind?: string, since?: number, handle?: string) =>
     request<FreebuffSessionPayload>(
-      `/freebuff/session?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}${since ? `&since=${since}` : ''}`,
+      `/freebuff/session?path=${encodeURIComponent(path)}${kind ? `&kind=${kind}` : ''}${since ? `&since=${since}` : ''}${handle ? `&handle=${encodeURIComponent(handle)}` : ''}`,
     ),
   models: (agent: string) =>
     request<{ ok: boolean; models: { id: string; label: string }[] }>(

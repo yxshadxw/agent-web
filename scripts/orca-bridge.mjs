@@ -32,6 +32,53 @@ const FREEBUFF_SESSION_ENTRY_LIMIT = 1_000;
 const FREEBUFF_SESSION_TEXT_MAX = 120_000;
 const FREEBUFF_SESSION_OUTPUT_MAX = 60_000;
 const freebuffSessionCache = new Map();
+const terminalHandleChat = new Map();
+const terminalLaunchAt = new Map();
+const terminalSentPrompt = new Map();
+
+function normalizeSnippet(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function isChatBoundElsewhere(chatId, handle) {
+  if (!chatId) return false;
+  for (const [otherHandle, boundId] of terminalHandleChat.entries()) {
+    if (boundId === chatId && otherHandle !== handle) return true;
+  }
+  return false;
+}
+
+async function readTerminalNorm(handle) {
+  if (!handle) return '';
+  try {
+    const snap = await readTerminal(handle, { screen: true, limit: 400 });
+    return normalizeSnippet((snap?.tail || []).join(' '));
+  } catch {
+    return '';
+  }
+}
+
+function entriesMatchTerminal(entries, screenNorm, sentPrompt) {
+  const msgs = entries.filter((e) => e.kind === 'message' && typeof e.text === 'string' && e.text.trim());
+  if (!msgs.length) return false;
+  if (sentPrompt) {
+    const needle = normalizeSnippet(sentPrompt).slice(0, 48);
+    if (needle.length >= 4 && msgs.some((m) => m.role === 'user' && normalizeSnippet(m.text).includes(needle))) {
+      return true;
+    }
+  }
+  if (!screenNorm) return false;
+  for (const m of msgs.slice(-8)) {
+    const lines = String(m.text || '')
+      .split(/\r?\n/)
+      .map((l) => normalizeSnippet(l))
+      .filter((l) => l.length >= 12);
+    for (const line of lines.slice(0, 4)) {
+      if (screenNorm.includes(line.slice(0, 48))) return true;
+    }
+  }
+  return false;
+}
 
 let overviewCache = null;
 let overviewCacheAt = 0;
@@ -1166,42 +1213,72 @@ function opencodeEntries(messages) {
   return entries;
 }
 
-async function readOpencodeSession(rawPath, since = 0) {
+async function readOpencodeSession(rawPath, since = 0, handle = '') {
   const worktree = await resolveWorktreePath(rawPath);
   const dir = encodeURIComponent(worktree.path);
   const { body: list } = await fetchJson(`${OPENCODE_URL}/session?directory=${dir}`, {});
-  const sessions = (Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [])
-    .filter((x) => x.directory === worktree.path && !x.parentID && (!since || (x.time?.updated || 0) >= since))
+  const launchAt = (handle ? terminalLaunchAt.get(handle) : 0) || since || 0;
+  const boundId = handle ? terminalHandleChat.get(handle) : '';
+  const allSessions = (Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : [])
+    .filter((x) => x.directory === worktree.path && !x.parentID)
     .sort((a, b) => (b.time?.updated || 0) - (a.time?.updated || 0));
-  if (!sessions.length) return { ok: false, entries: [], error: 'OpenCode 세션을 찾지 못했습니다.', fetchedAt: new Date().toISOString() };
-  const chosen = sessions[0];
-  const { body: msgs } = await fetchJson(`${OPENCODE_URL}/session/${chosen.id}/message?directory=${dir}`, {});
-  const messages = Array.isArray(msgs?.data) ? msgs.data : Array.isArray(msgs) ? msgs : [];
-  const entries = opencodeEntries(messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT)).slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
-  return { ok: true, entries, chatId: chosen.id, updatedAt: chosen.time?.updated || Date.now(), truncated: false, fetchedAt: new Date().toISOString() };
+
+  if (boundId) {
+    const bound = allSessions.find((x) => x.id === boundId);
+    if (!bound) return { ok: false, entries: [], error: 'OpenCode 세션을 찾지 못했습니다.', fetchedAt: new Date().toISOString() };
+    const { body: msgs } = await fetchJson(`${OPENCODE_URL}/session/${bound.id}/message?directory=${dir}`, {});
+    const messages = Array.isArray(msgs?.data) ? msgs.data : Array.isArray(msgs) ? msgs : [];
+    const entries = opencodeEntries(messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT)).slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
+    return { ok: true, entries, chatId: bound.id, updatedAt: bound.time?.updated || Date.now(), truncated: false, fetchedAt: new Date().toISOString() };
+  }
+
+  const candidates = allSessions.filter(
+    (x) => (!launchAt || (x.time?.updated || 0) >= launchAt) && !isChatBoundElsewhere(x.id, handle),
+  );
+  if (!candidates.length) {
+    return { ok: false, entries: [], error: '새 OpenCode 세션 대기 중입니다.', fetchedAt: new Date().toISOString() };
+  }
+
+  if (!handle) {
+    const chosen = candidates[0];
+    const { body: msgs } = await fetchJson(`${OPENCODE_URL}/session/${chosen.id}/message?directory=${dir}`, {});
+    const messages = Array.isArray(msgs?.data) ? msgs.data : Array.isArray(msgs) ? msgs : [];
+    const entries = opencodeEntries(messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT)).slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
+    return { ok: true, entries, chatId: chosen.id, updatedAt: chosen.time?.updated || Date.now(), truncated: false, fetchedAt: new Date().toISOString() };
+  }
+
+  const screenNorm = await readTerminalNorm(handle);
+  const sentPrompt = terminalSentPrompt.get(handle) || '';
+  for (const candidate of candidates.slice(0, 6)) {
+    const { body: msgs } = await fetchJson(`${OPENCODE_URL}/session/${candidate.id}/message?directory=${dir}`, {});
+    const messages = Array.isArray(msgs?.data) ? msgs.data : Array.isArray(msgs) ? msgs : [];
+    const entries = opencodeEntries(messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT)).slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
+    if (entriesMatchTerminal(entries, screenNorm, sentPrompt)) {
+      terminalHandleChat.set(handle, candidate.id);
+      return { ok: true, entries, chatId: candidate.id, updatedAt: candidate.time?.updated || Date.now(), truncated: false, fetchedAt: new Date().toISOString() };
+    }
+  }
+  return { ok: false, entries: [], error: '새 OpenCode 세션 대기 중입니다.', fetchedAt: new Date().toISOString() };
 }
 
-async function readFreebuffSession(rawPath, requestedChat, since = 0) {
-  const worktree = await resolveWorktreePath(rawPath);
-  const projectDir = freebuffProjectDirForPath(worktree.path);
-  if (!existsSync(projectDir)) {
-    return {
-      ok: false,
-      entries: [],
-      error: '이 워크트리의 Freebuff 세션 기록을 찾지 못했습니다.',
-      fetchedAt: new Date().toISOString(),
-    };
+function listFreebuffChats(projectDir) {
+  const roots = [join(projectDir, 'chats'), projectDir].filter((dir) => existsSync(dir));
+  const chats = [];
+  for (const root of roots) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^\d{4}-\d{2}-\d{2}T[A-Za-z0-9.:-]+$/.test(entry.name)) continue;
+      const file = join(root, entry.name, 'chat-messages.json');
+      if (!existsSync(file)) continue;
+      const info = statSync(file);
+      chats.push({ chatId: entry.name, file, mtimeMs: info.mtimeMs });
+    }
   }
-  const chat = findFreebuffChat(projectDir, requestedChat);
+  chats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return chats;
+}
+
+function parseFreebuffFile(chat) {
   const fileStat = statSync(chat.file);
-  if (since && !requestedChat && fileStat.mtimeMs < since) {
-    return {
-      ok: false,
-      entries: [],
-      error: '새 Freebuff 세션 대기 중입니다.',
-      fetchedAt: new Date().toISOString(),
-    };
-  }
   const cached = freebuffSessionCache.get(chat.file);
   if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
     return { ...cached.payload, fetchedAt: new Date().toISOString() };
@@ -1237,6 +1314,57 @@ async function readFreebuffSession(rawPath, requestedChat, since = 0) {
     if (first) freebuffSessionCache.delete(first);
   }
   return payload;
+}
+
+async function readFreebuffSession(rawPath, requestedChat, since = 0, handle = '') {
+  const worktree = await resolveWorktreePath(rawPath);
+  const projectDir = freebuffProjectDirForPath(worktree.path);
+  if (!existsSync(projectDir)) {
+    return {
+      ok: false,
+      entries: [],
+      error: '이 워크트리의 Freebuff 세션 기록을 찾지 못했습니다.',
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+  const boundChatId = !requestedChat && handle ? terminalHandleChat.get(handle) : '';
+  const effectiveChat = requestedChat || boundChatId || '';
+  if (effectiveChat) {
+    const chat = findFreebuffChat(projectDir, effectiveChat);
+    return parseFreebuffFile(chat);
+  }
+
+  const launchAt = (handle ? terminalLaunchAt.get(handle) : 0) || since || 0;
+  const chats = listFreebuffChats(projectDir).filter(
+    (c) => (!launchAt || c.mtimeMs >= launchAt) && !isChatBoundElsewhere(c.chatId, handle),
+  );
+  if (!chats.length) {
+    return {
+      ok: false,
+      entries: [],
+      error: '새 Freebuff 세션 대기 중입니다.',
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+  if (!handle) {
+    return parseFreebuffFile(chats[0]);
+  }
+
+  const screenNorm = await readTerminalNorm(handle);
+  const sentPrompt = terminalSentPrompt.get(handle) || '';
+  for (const chat of chats.slice(0, 6)) {
+    const payload = parseFreebuffFile(chat);
+    if (entriesMatchTerminal(payload.entries, screenNorm, sentPrompt)) {
+      terminalHandleChat.set(handle, chat.chatId);
+      return payload;
+    }
+  }
+  return {
+    ok: false,
+    entries: [],
+    error: '새 Freebuff 세션 대기 중입니다.',
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 const AGY_BRAIN_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'brain');
@@ -1418,6 +1546,7 @@ async function sendTerminalMessage(body) {
   }
   if (!text) throw new Error('보낼 메시지를 입력해 주세요.');
   if (text.length > 2_000) throw new Error('메시지는 2,000자 이하로 입력해 주세요.');
+  if (!text.startsWith('/')) terminalSentPrompt.set(handle, text);
   // Freebuff's TUI can keep its draft even when the PTY receives Enter. A
   // mouse event restores the composer focus; without it text goes into the
   // draft but the agent never starts a turn. Plain shell terminals must not
@@ -2188,8 +2317,9 @@ async function route(req, res) {
   if (method === 'GET' && path === '/freebuff/session') {
     try {
       const since = Number(url.searchParams.get('since') || 0) || 0;
+      const handle = url.searchParams.get('handle') || '';
       if (url.searchParams.get('kind') === 'opencode') {
-        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || '', since));
+        json(res, 200, await readOpencodeSession(url.searchParams.get('path') || '', since, handle));
         return;
       }
       json(
@@ -2199,6 +2329,7 @@ async function route(req, res) {
           url.searchParams.get('path') || '',
           url.searchParams.get('chat') || '',
           since,
+          handle,
         ),
       );
     } catch (error) {

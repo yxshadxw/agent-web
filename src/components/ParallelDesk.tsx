@@ -3544,7 +3544,12 @@ function LogDrawer({
           ? Number(localStorage.getItem(`sessionSince:${sinceKey}`) || 0) || undefined
           : undefined;
         void orcaApi
-          .freebuffSession(agent.path, isOpenCode ? 'opencode' : undefined, since)
+          .freebuffSession(
+            agent.path,
+            isOpenCode ? 'opencode' : undefined,
+            since,
+            agent.terminalHandle || undefined,
+          )
           .then((next) => {
             if (token !== loadTokenRef.current) return;
             setFreebuffSession((current) =>
