@@ -59,21 +59,22 @@ async function readTerminalNorm(handle) {
 }
 
 function entriesMatchTerminal(entries, screenNorm, sentPrompt) {
-  const msgs = entries.filter((e) => e.kind === 'message' && typeof e.text === 'string' && e.text.trim());
-  if (!msgs.length) return false;
+  const userMsgs = entries.filter((e) => e.kind === 'message' && e.role === 'user' && typeof e.text === 'string' && e.text.trim());
+  if (!userMsgs.length) return false;
   if (sentPrompt) {
     const needle = normalizeSnippet(sentPrompt).slice(0, 48);
-    if (needle.length >= 4 && msgs.some((m) => m.role === 'user' && normalizeSnippet(m.text).includes(needle))) {
+    if (needle.length >= 4 && userMsgs.some((m) => normalizeSnippet(m.text).includes(needle))) {
       return true;
     }
   }
   if (!screenNorm) return false;
-  for (const m of msgs.slice(-8)) {
+  if (screenNorm.includes('enter a coding task') && !sentPrompt) return false;
+  for (const m of userMsgs.slice(-5)) {
     const lines = String(m.text || '')
       .split(/\r?\n/)
       .map((l) => normalizeSnippet(l))
-      .filter((l) => l.length >= 12);
-    for (const line of lines.slice(0, 4)) {
+      .filter((l) => l.length >= 16);
+    for (const line of lines.slice(0, 3)) {
       if (screenNorm.includes(line.slice(0, 48))) return true;
     }
   }
@@ -899,13 +900,26 @@ async function sendDeskMessage(body) {
   // before resolving the recipient, and accept a terminal handle as well as an
   // agent id so the message box can address any live terminal.
   const overview = await getOverview(true);
-  const target = overview.agents.find(
+  const cleanToId = toId.replace(/^launch:/, '');
+  let target = overview.agents.find(
     (agent) =>
       agent.id === toId ||
+      agent.id === cleanToId ||
       agent.terminalHandle === toId ||
+      agent.terminalHandle === cleanToId ||
       (agent.orcaSessionId &&
-        (toId === agent.orcaSessionId || toId === `orca_session_id:${agent.orcaSessionId}`)),
+        (cleanToId === agent.orcaSessionId || cleanToId === `orca_session_id:${agent.orcaSessionId}`)),
   );
+  if (!target && /^(?:term_|orca_session_id:|[0-9a-f]{8}-[0-9a-f]{4}-)/i.test(cleanToId)) {
+    const isTerm = cleanToId.startsWith('term_');
+    const sid = cleanToId.replace(/^orca_session_id:/, '');
+    target = {
+      id: cleanToId,
+      title: '에이전트',
+      terminalHandle: isTerm ? cleanToId : null,
+      orcaSessionId: isTerm ? null : sid,
+    };
+  }
   if (!target) throw new Error('받는 작업자를 찾지 못했습니다.');
   const source = fromId ? overview.agents.find((agent) => agent.id === fromId) : null;
   // Orca rejects orchestration sends addressed to a terminal agent by session
@@ -1844,13 +1858,16 @@ function makeSlug(prompt, index) {
 
 function launchHandle(result) {
   const launch = result?.launch || result?.agentLaunch || result || {};
-  return (
+  const handle =
     launch?.outcome?.handle ||
     launch?.handle ||
     result?.agentTerminalHandle ||
     result?.terminalHandle ||
-    null
-  );
+    null;
+  if (handle && !terminalLaunchAt.has(handle)) {
+    terminalLaunchAt.set(handle, Date.now() - 2000);
+  }
+  return handle;
 }
 
 function launchWorktreeId(result) {

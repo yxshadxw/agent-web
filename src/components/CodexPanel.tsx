@@ -282,6 +282,7 @@ export function CodexPanel({
     }
     return initial.current.model ?? '';
   });
+  const [settingsPanel, setSettingsPanel] = useState<'model' | 'effort' | null>(null);
   const [agyProviders, setAgyProviders] = useState<AgentProvider[]>([]);
   const [ocProviders, setOcProviders] = useState<AgentProvider[]>([]);
 
@@ -302,7 +303,6 @@ export function CodexPanel({
   const [effort, setEffort] = useState(initial.current.effort ?? 'medium');
   const [autoApprove, setAutoApprove] = useState(Boolean(initial.current.autoApprove));
   const [permissionOpen, setPermissionOpen] = useState(false);
-  const [settingsPanel, setSettingsPanel] = useState<'model' | 'effort' | null>(null);
   const [settingsClosing, setSettingsClosing] = useState(false);
   const [statsClosing, setStatsClosing] = useState(false);
   const [permissionClosing, setPermissionClosing] = useState(false);
