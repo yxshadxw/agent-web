@@ -98,6 +98,8 @@ export type TranscriptPayload = {
   agent?: string | null;
   source?: string;
   state?: string | null;
+  model?: string | null;
+  effort?: string | null;
   entries: TranscriptEntry[];
   limited?: boolean;
   fetchedAt?: string;
@@ -350,6 +352,14 @@ export const orcaApi = {
   models: (agent: string) =>
     request<{ ok: boolean; models: { id: string; label: string }[] }>(
       `/models?agent=${encodeURIComponent(agent)}`,
+    ),
+  setSessionModel: (body: { sessionId: string; modelId: string }) =>
+    request<{ ok: boolean; sessionId: string; model: string; effort?: string | null }>(
+      '/session/model',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
     ),
   addProject: (path: string) =>
     request<{ ok: boolean; path: string; kind: string; overview: OrcaOverview }>('/projects', {

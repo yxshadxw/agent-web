@@ -3732,9 +3732,16 @@ function LogDrawer({
   useEffect(() => {
     setAgyModelOverride(null);
   }, [agent.id, agent.orcaSessionId]);
-  const pickedAgyModel = agyModelOverride || (agent.orcaSessionId
-    ? localStorage.getItem(`agyModel:${agent.orcaSessionId}`)
-    : null);
+  const liveTranscriptModelId =
+    transcript?.model
+      ? transcript.effort && !transcript.model.toLowerCase().endsWith(`-${transcript.effort.toLowerCase()}`)
+        ? `${transcript.model}-${transcript.effort.toLowerCase()}`
+        : transcript.model
+      : null;
+  const pickedAgyModel =
+    agyModelOverride ||
+    liveTranscriptModelId ||
+    (agent.orcaSessionId ? localStorage.getItem(`agyModel:${agent.orcaSessionId}`) : null);
   const pickedLabel = pickedAgyModel
     ? resolveModelLabel(pickedAgyModel, agent.agent, liveDrawerModels)
     : null;
@@ -3927,10 +3934,14 @@ function LogDrawer({
         }
       }
       if (agent.orcaSessionId) {
+        await orcaApi.setSessionModel({
+          sessionId: agent.orcaSessionId,
+          modelId,
+        });
         localStorage.setItem(`agyModel:${agent.orcaSessionId}`, modelId);
       }
       setAgyModelOverride(modelId);
-      notify(`${AGY_MODEL_LABEL(modelId)}(으)로 모델을 변경했어요`);
+      notify(`${resolveModelLabel(modelId, agent.agent, liveDrawerModels)}(으)로 모델을 변경했어요`);
       setAgyPickerOpen(false);
     } catch (cause) {
       setSendError(cause instanceof Error ? cause.message : '모델을 바꾸지 못했어요.');

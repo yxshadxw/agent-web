@@ -6,9 +6,10 @@
  * and returns the normalized fields the desk needs.
  */
 import { execFile, execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -1670,15 +1671,145 @@ function enrichAgyTools(entries, state = '') {
   return entries;
 }
 
+function canonicalOrcaJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(canonicalOrcaJson).join(',')}]`;
+  return `{${Object.entries(value)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${JSON.stringify(k)}:${canonicalOrcaJson(v)}`)
+    .join(',')}}`;
+}
+
+function callOrcaRuntimeSocket(method, params, timeoutMs = 8_000) {
+  const userDataDir = process.env.ORCA_USER_DATA_PATH || join(homedir(), '.config', 'orca');
+  const runtimeFile = join(userDataDir, 'orca-runtime.json');
+  if (!existsSync(runtimeFile)) {
+    return Promise.reject(new Error('Orca 런타임 소켓 정보를 찾지 못했습니다.'));
+  }
+  const rt = JSON.parse(readFileSync(runtimeFile, 'utf8'));
+  const transport = (Array.isArray(rt.transports) ? rt.transports : [rt.transport]).find(
+    (item) => item && item.kind === 'unix' && (item.endpoint || item.path),
+  );
+  const sockPath = transport?.endpoint || transport?.path;
+  if (!sockPath || !rt.authToken) {
+    return Promise.reject(new Error('Orca 런타임 소켓 경로 또는 인증 토큰이 없습니다.'));
+  }
+  return new Promise((resolvePromise, rejectPromise) => {
+    const sock = createConnection(sockPath);
+    const id = randomUUID();
+    let buf = '';
+    let settled = false;
+    const finish = (err, res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        sock.destroy();
+      } catch {
+        // ignore
+      }
+      if (err) rejectPromise(err);
+      else resolvePromise(res);
+    };
+    const timer = setTimeout(() => finish(new Error('Orca 런타임 소켓 응답 시간 초과')), timeoutMs);
+    sock.on('connect', () => {
+      sock.write(`${JSON.stringify({ id, authToken: rt.authToken, method, params })}\n`);
+    });
+    sock.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      for (const line of buf.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.id === id) {
+            finish(null, msg);
+            return;
+          }
+        } catch {
+          // wait for full line
+        }
+      }
+    });
+    sock.on('error', (err) => finish(err));
+  });
+}
+
+async function setOrcaSessionOption(sessionId, key, value) {
+  const fields = { key, value };
+  const payloadFingerprint = createHash('sha256')
+    .update(canonicalOrcaJson({ method: 'agentSession.setOption', sessionId, fields }))
+    .digest('hex');
+  const clientOperationId = `${Date.now()}-${randomUUID().replace(/-/g, '').toLowerCase()}`;
+  const resp = await callOrcaRuntimeSocket('agentSession.setOption', {
+    envelope: {
+      sessionId,
+      clientOperationId,
+      expectedRuntimeFence: null,
+      payloadFingerprint,
+    },
+    key,
+    value,
+  });
+  if (!resp?.ok || resp?.result?.ok === false) {
+    throw new Error(
+      resp?.error?.message ||
+        resp?.result?.refusal?.message ||
+        `Orca 세션 옵션(${key})을 변경하지 못했습니다.`,
+    );
+  }
+  return resp.result?.value?.options || { [key]: value };
+}
+
+async function setOrcaSessionModel({ sessionId, modelId }) {
+  const id = String(sessionId || '').trim();
+  const rawModel = String(modelId || '').trim();
+  if (!/^[a-f0-9-]{20,64}$/i.test(id)) {
+    throw new Error('유효한 Orca 세션 ID가 필요합니다.');
+  }
+  if (!rawModel) {
+    throw new Error('변경할 모델 ID가 필요합니다.');
+  }
+  const match = rawModel.match(/^(.*?)[-:](low|medium|high|xhigh|max|ultra|minimal)$/i);
+  const model = match ? match[1] : rawModel;
+  const effort = match ? match[2].toLowerCase() : '';
+  let options = await setOrcaSessionOption(id, 'model', model);
+  if (effort) {
+    try {
+      options = await setOrcaSessionOption(id, 'effort', effort);
+    } catch {
+      // Some models do not expose an effort option; model change still succeeded.
+    }
+  }
+  return {
+    ok: true,
+    sessionId: id,
+    model: options?.model || model,
+    effort: options?.effort || effort || null,
+    options,
+  };
+}
+
+async function readOrcaSessionOptions(sessionId) {
+  try {
+    const resp = await callOrcaRuntimeSocket('agentSession.options', { sessionId }, 2_500);
+    const current = resp?.result?.options || resp?.result?.value?.options || null;
+    if (current && typeof current === 'object') return current;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 async function readTranscript(sessionId) {
   const id = typeof sessionId === 'string' ? sessionId.trim() : '';
   if (!/^[a-f0-9-]{20,64}$/i.test(id)) {
     throw new Error('세션 ID가 올바르지 않습니다.');
   }
-  const raw = await runOrca(
-    ['agent', 'read', `orca_session_id:${id}`, '--limit', '100', '--json'],
-    30_000,
-  );
+  const [raw, sessionOptions] = await Promise.all([
+    runOrca(['agent', 'read', `orca_session_id:${id}`, '--limit', '100', '--json'], 30_000),
+    readOrcaSessionOptions(id),
+  ]);
   const data = raw?.result || raw;
   return {
     ok: true,
@@ -1687,6 +1818,8 @@ async function readTranscript(sessionId) {
     agent: data?.agent || null,
     source: data?.source || 'transcript',
     state: data?.state || null,
+    model: sessionOptions?.model || data?.model || null,
+    effort: sessionOptions?.effort || data?.effort || null,
     entries:
       data?.agent === 'antigravity' && Array.isArray(data?.entries)
         ? enrichAgyTools(data.entries, data?.state || '')
@@ -2595,6 +2728,16 @@ async function route(req, res) {
       json(res, 200, { ok: true, models });
     } catch (error) {
       json(res, 200, { ok: false, models: [], error: errorMessage(error) });
+    }
+    return;
+  }
+
+  if (method === 'POST' && path === '/session/model') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      json(res, 200, await setOrcaSessionModel(body));
+    } catch (error) {
+      json(res, 400, { ok: false, error: errorMessage(error) });
     }
     return;
   }
