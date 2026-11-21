@@ -3400,12 +3400,19 @@ function LogDrawer({
     setAgySwitching(true);
     setSendError(null);
     try {
+      if (agent.terminalHandle) {
+        await orcaApi.sendTerminal(agent.terminalHandle, `/model ${modelId}`);
+      } else if (isAgy && agent.id) {
+        await orcaApi.sendMessage({ text: `/model ${modelId}`, toId: agent.id });
+      }
       if (agent.orcaSessionId) {
         localStorage.setItem(`agyModel:${agent.orcaSessionId}`, modelId);
       }
       setAgyModelOverride(modelId);
       notify(`${AGY_MODEL_LABEL(modelId)}(으)로 모델을 변경했어요`);
       setAgyPickerOpen(false);
+    } catch (cause) {
+      setSendError(cause instanceof Error ? cause.message : '모델을 바꾸지 못했어요.');
     } finally {
       setAgySwitching(false);
     }
