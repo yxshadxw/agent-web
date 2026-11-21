@@ -3170,8 +3170,31 @@ function LogDrawer({
     }
     return parts.join(' · ') || '사용량 —';
   }, [agyScreen, agyUsageGroup, isAgy]);
-  const agyModelLabel = agyScreen.model || (isAgy ? 'Agy' : '');
-  const agyEffortLabel = agyScreen.effort || 'effort';
+  // Orca-managed Agy chats have no terminal screen to read the model from, so
+  // fall back to the Agy bridge's configured default model.
+  const [agyDefault, setAgyDefault] = useState<{ model: string; effort: string } | null>(null);
+  useEffect(() => {
+    if (!isAgy || agyScreen.model) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const [cfg, prov] = await Promise.all([
+          fetch('/agy-api/config', { credentials: 'include' }).then((r) => r.json()),
+          fetch('/agy-api/config/providers', { credentials: 'include' }).then((r) => r.json()),
+        ]);
+        const id = cfg?.model as string;
+        const meta = prov?.providers?.[0]?.models?.[id];
+        if (alive && id) setAgyDefault({ model: meta?.name || id, effort: 'high' });
+      } catch {
+        /* keep placeholder */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isAgy, agyScreen.model]);
+  const agyModelLabel = agyScreen.model || agyDefault?.model || (isAgy ? 'Agy' : '');
+  const agyEffortLabel = agyScreen.effort || agyDefault?.effort || 'effort';
   // A chat stays a chat even if Orca also exposes a terminal handle for it.
   const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking = transcript ? transcript.state === 'working' : agent.state === 'working';
