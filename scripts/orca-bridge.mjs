@@ -1053,6 +1053,7 @@ async function sendDeskMessage(body) {
 
   const fromName = source?.title || '오퍼레이터';
   const subject = `[Desk] ${fromName} → ${target.title}`.slice(0, 160);
+  const bodyWithTodoRule = `${text}\n\n[진행 지시: 이 작업을 시작할 때 반드시 3~6단계의 짧은 한국어 Todo 체크리스트(- [ ] 대기, - [/] 진행 중, - [x] 완료)를 먼저 작성하고 단계별로 하나씩 완료(- [x])하며 진행하세요.]`;
   const record = {
     id: `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     at: new Date().toISOString(),
@@ -1076,7 +1077,7 @@ async function sendDeskMessage(body) {
         '--subject',
         subject,
         '--body',
-        text,
+        bodyWithTodoRule,
         '--to',
         to,
         '--type',

@@ -813,38 +813,51 @@ export default function App() {
           todos={
             agent.todos.length > 0
               ? agent.todos
-              : deriveTodosFromTools(
-                  agent.messages.flatMap((m) =>
-                    m.info.role === 'assistant'
-                      ? m.parts.flatMap((p) => {
-                          if (p.type !== 'tool') return [];
-                          const inp = (p.state.input || {}) as Record<string, unknown>;
-                          const detail =
-                            (typeof inp.command === 'string' && inp.command) ||
-                            (typeof inp.filePath === 'string' && inp.filePath) ||
-                            (typeof inp.path === 'string' && inp.path) ||
-                            (typeof inp.query === 'string' && inp.query) ||
-                            p.tool;
-                          return [
-                            {
-                              id: p.id,
-                              tool: p.tool,
-                              detail,
-                              status: p.state.status,
-                            },
-                          ];
-                        })
-                      : [],
-                  ),
-                  agent.messages.flatMap((m) =>
-                    m.info.role === 'assistant'
-                      ? m.parts.flatMap((p) =>
-                          p.type === 'text' || p.type === 'reasoning' ? [p.text] : [],
-                        )
-                      : [],
-                  ),
-                  agent.busy,
-                ) as any
+              : (() => {
+                  let lastUserIdx = -1;
+                  for (let i = agent.messages.length - 1; i >= 0; i -= 1) {
+                    if (agent.messages[i].info.role === 'user') {
+                      lastUserIdx = i;
+                      break;
+                    }
+                  }
+                  const turnMessages =
+                    lastUserIdx >= 0
+                      ? agent.messages.slice(lastUserIdx + 1)
+                      : agent.messages;
+                  return deriveTodosFromTools(
+                    turnMessages.flatMap((m) =>
+                      m.info.role === 'assistant'
+                        ? m.parts.flatMap((p) => {
+                            if (p.type !== 'tool') return [];
+                            const inp = (p.state.input || {}) as Record<string, unknown>;
+                            const detail =
+                              (typeof inp.command === 'string' && inp.command) ||
+                              (typeof inp.filePath === 'string' && inp.filePath) ||
+                              (typeof inp.path === 'string' && inp.path) ||
+                              (typeof inp.query === 'string' && inp.query) ||
+                              p.tool;
+                            return [
+                              {
+                                id: p.id,
+                                tool: p.tool,
+                                detail,
+                                status: p.state.status,
+                              },
+                            ];
+                          })
+                        : [],
+                    ),
+                    turnMessages.flatMap((m) =>
+                      m.info.role === 'assistant'
+                        ? m.parts.flatMap((p) =>
+                            p.type === 'text' || p.type === 'reasoning' ? [p.text] : [],
+                          )
+                        : [],
+                    ),
+                    agent.busy,
+                  ) as any;
+                })()
           }
           autoApprove={agent.autoApprove}
           panel={panel}

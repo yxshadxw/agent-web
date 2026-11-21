@@ -672,6 +672,17 @@ pre {
   border: 1px solid #2d2d30;
   background: #1b1b1d;
   overflow: hidden;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.todo-card.is-active {
+  border-color: rgba(245, 184, 65, 0.38);
+  background: linear-gradient(180deg, rgba(245, 184, 65, 0.07), #191816);
+}
+
+.todo-card.is-done {
+  border-color: rgba(71, 212, 134, 0.38);
+  background: linear-gradient(180deg, rgba(71, 212, 134, 0.07), #161a18);
 }
 
 .todo-head {
@@ -700,17 +711,40 @@ pre {
   width: 3.5px;
   height: 14px;
   border-radius: 1.5px;
+  background: #35322c;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.todo-bars i.active {
+  background: #f5b841;
+  box-shadow: 0 0 8px rgba(245, 184, 65, 0.38);
+}
+
+.todo-bars i.done {
   background: var(--green);
-  box-shadow: 0 0 8px rgba(71, 212, 134, 0.32);
+  box-shadow: 0 0 8px rgba(71, 212, 134, 0.35);
+}
+
+.todo-bars i.dim {
+  background: #34312c;
+  box-shadow: none;
 }
 
 .todo-title {
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 550;
   color: #e6e3df;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.todo-card.is-active .todo-title {
+  color: #f6c453;
+}
+
+.todo-card.is-done .todo-title {
+  color: #5ce099;
 }
 
 .todo-count {
@@ -775,8 +809,27 @@ pre {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgba(71, 212, 134, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #7e7b82;
+}
+
+.todo-check.status-completed {
+  background: rgba(71, 212, 134, 0.14);
   color: var(--green);
+}
+
+.todo-check.status-in_progress {
+  background: rgba(245, 184, 65, 0.16);
+  color: #f5b841;
+}
+
+.todo-item.status-in_progress {
+  color: #f6c453;
+  font-weight: 550;
+}
+
+.todo-item.status-completed {
+  color: #96939a;
 }
 
 .composer {

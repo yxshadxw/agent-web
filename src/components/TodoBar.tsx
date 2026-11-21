@@ -26,13 +26,15 @@ export function TodoBar({
   const completed = todos.filter((t) => t.status === 'completed').length;
   const inProgress = todos.find((t) => t.status === 'in_progress');
   const pending = todos.find((t) => t.status === 'pending');
-  const allDone = completed === todos.length || (!inProgress && !pending && completed > 0);
+  const allDone = todos.length > 0 && completed === todos.length;
+  const ratio = todos.length > 0 ? completed / todos.length : 0;
+  const litCount = allDone ? 3 : ratio >= 0.66 ? 2 : ratio > 0 || inProgress ? 1 : 1;
   const title =
     inProgress?.content ||
     (allDone ? '모두 끝났어요' : pending?.content || '진행 중');
 
   return (
-    <div className={`todo-card ${open ? 'expanded' : ''}`}>
+    <div className={`todo-card ${open ? 'expanded' : ''} ${allDone ? 'is-done' : 'is-active'}`}>
       <div className="todo-head">
         <button
           type="button"
@@ -41,13 +43,22 @@ export function TodoBar({
           aria-expanded={open}
         >
           <span className="todo-bars" aria-hidden="true">
-            <i className={allDone ? 'done' : 'active'} />
-            <i className={allDone ? 'done' : 'active'} />
-            <i className={allDone ? 'done' : 'active'} />
+            {[0, 1, 2].map((idx) => (
+              <i
+                key={idx}
+                className={
+                  allDone
+                    ? 'done'
+                    : idx < litCount
+                      ? 'active'
+                      : 'dim'
+                }
+              />
+            ))}
           </span>
           <span className="todo-title">{title}</span>
           <span className="todo-count">
-            {allDone ? todos.length : completed} / {todos.length}
+            {completed} / {todos.length}
           </span>
         </button>
         <button
@@ -170,8 +181,11 @@ function humanizeToolStep(tool: RawToolLike): { key: string; label: string } | n
  * a task and check items off one by one drive the TodoBar directly.
  */
 export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
-  const map = new Map<string, TodoItem>();
   const lineRe = /^\s*(?:[-*+]|\d+\.)\s*\[([ xX/~-])\]\s+(.+)$/;
+  // Scan from the latest text block backwards; once we find texts in the current turn
+  // that contain a checklist, merge them in chronological order so step updates
+  // (- [ ] -> - [/] -> - [x]) within the active turn override earlier states cleanly.
+  const map = new Map<string, TodoItem>();
 
   for (const text of texts) {
     if (!text) continue;
@@ -191,8 +205,9 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
           : mark === '/' || mark === '~' || mark === '-'
             ? 'in_progress'
             : 'pending';
+      const existing = map.get(key);
       map.set(key, {
-        id: `chk-${map.size}-${key.slice(0, 20)}`,
+        id: existing?.id || `chk-${map.size}-${key.slice(0, 20)}`,
         content,
         status,
       });
@@ -203,11 +218,6 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
   if (list.length > 0 && busy && !list.some((item) => item.status === 'in_progress')) {
     const firstPending = list.find((item) => item.status === 'pending');
     if (firstPending) firstPending.status = 'in_progress';
-  }
-  if (list.length > 0 && !busy) {
-    for (const item of list) {
-      if (item.status === 'in_progress') item.status = 'completed';
-    }
   }
   return list;
 }

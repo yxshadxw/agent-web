@@ -4837,10 +4837,22 @@ function LogDrawer({
         {isFreebuff && (
           <form className="desk-log-compose desk-freebuff-compose" onSubmit={sendReply}>
             {!freebuffPanel && (() => {
-              const fbTools = freebuffSessionEntries.filter(
+              let lastUserIdx = -1;
+              for (let i = freebuffSessionEntries.length - 1; i >= 0; i -= 1) {
+                const item = freebuffSessionEntries[i];
+                if (item.kind === 'message' && item.role === 'user') {
+                  lastUserIdx = i;
+                  break;
+                }
+              }
+              const turnEntries =
+                lastUserIdx >= 0
+                  ? freebuffSessionEntries.slice(lastUserIdx + 1)
+                  : freebuffSessionEntries;
+              const fbTools = turnEntries.filter(
                 (e): e is Extract<FreebuffSessionEntry, { kind: 'tool' }> => e.kind === 'tool',
               );
-              const fbTexts = freebuffSessionEntries.flatMap((e) =>
+              const fbTexts = turnEntries.flatMap((e) =>
                 (e.kind === 'message' && e.role === 'assistant') || e.kind === 'thinking'
                   ? [e.text]
                   : [],
@@ -5169,8 +5181,18 @@ function LogDrawer({
             onDrop={dropFile}
           >
             {!agyPickerOpen && !agyUsageOpen && (() => {
-              const agyTools = agyEntries.filter((e) => e.kind === 'tool');
-              const agyTexts = agyEntries
+              let lastUserIdx = -1;
+              for (let i = agyEntries.length - 1; i >= 0; i -= 1) {
+                const item = agyEntries[i];
+                if (item.kind === 'message' && item.role === 'user') {
+                  lastUserIdx = i;
+                  break;
+                }
+              }
+              const turnEntries =
+                lastUserIdx >= 0 ? agyEntries.slice(lastUserIdx + 1) : agyEntries;
+              const agyTools = turnEntries.filter((e) => e.kind === 'tool');
+              const agyTexts = turnEntries
                 .filter(
                   (e) =>
                     (e.kind === 'message' && e.role === 'assistant') ||
