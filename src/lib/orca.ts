@@ -312,26 +312,35 @@ export type LaunchResult = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/orca-api${path}`, {
-    credentials: 'include',
-    ...init,
-    headers: {
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  });
+  const controller = init?.signal ? null : new AbortController();
+  const timer = controller
+    ? window.setTimeout(() => controller.abort(new Error('Orca 응답 시간이 초과되었습니다.')), 12_000)
+    : 0;
+  try {
+    const res = await fetch(`/orca-api${path}`, {
+      credentials: 'include',
+      ...init,
+      signal: init?.signal ?? controller?.signal,
+      headers: {
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    });
 
-  if (!res.ok) {
-    let message = `요청에 실패했어요 (${res.status})`;
-    try {
-      const body = await res.json();
-      message = body?.error || body?.message || message;
-    } catch {
-      // ignore non-json errors
+    if (!res.ok) {
+      let message = `요청에 실패했어요 (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body?.error || body?.message || message;
+      } catch {
+        // ignore non-json errors
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    return (await res.json()) as T;
+  } finally {
+    if (timer) window.clearTimeout(timer);
   }
-  return (await res.json()) as T;
 }
 
 export const orcaApi = {

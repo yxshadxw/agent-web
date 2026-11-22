@@ -50,6 +50,9 @@ const freebuffSessionCache = new Map();
 const terminalHandleChat = new Map();
 const terminalLaunchAt = new Map();
 const terminalSentPrompt = new Map();
+const terminalRuleSent = new Set();
+const TERMINAL_INLINE_RULE =
+  '[Agent Desk 지시: ask_user 등 선택지·확인·질문 팝업 도구는 절대 호출하지 말고(필요 시 일반 채팅 텍스트로만 질문), 작업 전 짧은 한국어 Todo(- [ ] / - [/] / - [x])를 먼저 작성한 뒤 진행하세요.]';
 
 function normalizeSnippet(text) {
   return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -134,7 +137,7 @@ function saveMessageLog() {
 const messageLog = loadMessageLog();
 
 const COMMON_RULES = `[Agent Desk 공통 지시 — 반드시 준수]
-- 사용자에게 선택지, 확인, 모델 선택, 승인 팝업을 띄우지 마세요. 안전한 기본값을 스스로 골라 작업을 끝까지 진행하세요.
+- 사용자에게 선택지, 확인, 모델 선택, 승인 팝업을 띄우지 마세요. 특히 ask_user 같은 대화형 질문/선택지 폼 도구(Some questions for you 등)는 절대 호출하지 말고, 확인이 꼭 필요할 때도 팝업 도구 대신 일반 텍스트로만 간단히 물어보세요. 안전한 기본값을 스스로 골라 작업을 끝까지 진행하세요.
 - 파일 삭제, 배포, 푸시, 자격 증명 변경처럼 되돌리기 어려운 동작만 멈추고 이유를 남기세요.
 - 코드베이스 구조나 관계를 물을 때는 graphify를 먼저 사용하고, graphify-out이 없으면 관련 파일만 좁혀 읽어 토큰을 아끼세요.
 - 전체 파일·전체 로그·전체 diff를 반복해서 읽지 말고, 검색 결과와 필요한 줄 범위만 읽으세요.
@@ -252,6 +255,8 @@ async function runOrca(args, timeout = ORCA_TIMEOUT) {
   const cleanEnv = { ...process.env };
   delete cleanEnv.ORCA_SESSION_ID;
   delete cleanEnv.ORCA_AGENT_SESSION_ID;
+  delete cleanEnv.ORCA_AGENT_SESSION_SPAWN_TOKEN;
+  delete cleanEnv.ORCA_STRUCTURED_SESSION;
   delete cleanEnv.ORCA_TERMINAL_HANDLE;
   delete cleanEnv.ORCA_RUN_ID;
   delete cleanEnv.ORCA_DISPATCH_ID;
@@ -293,6 +298,25 @@ async function runOrca(args, timeout = ORCA_TIMEOUT) {
     }
     if (error?.killed) {
       throw new Error('Orca 응답 시간이 초과되었습니다.');
+    }
+    const stdoutText = String(error?.stdout || '').trim();
+    if (stdoutText) {
+      try {
+        const parsed = JSON.parse(stdoutText);
+        const detail =
+          parsed?.error?.message ||
+          (typeof parsed?.error === 'string' ? parsed.error : '') ||
+          parsed?.message;
+        if (detail) throw new Error(detail);
+      } catch (parseErr) {
+        if (parseErr instanceof Error && parseErr.message !== stdoutText && !/JSON/i.test(parseErr.message)) {
+          throw parseErr;
+        }
+      }
+    }
+    const stderrText = String(error?.stderr || '').trim();
+    if (stderrText) {
+      throw new Error(stderrText);
     }
     throw error;
   }
@@ -1053,7 +1077,7 @@ async function sendDeskMessage(body) {
 
   const fromName = source?.title || '오퍼레이터';
   const subject = `[Desk] ${fromName} → ${target.title}`.slice(0, 160);
-  const bodyWithTodoRule = `${text}\n\n[진행 지시: 이 작업을 시작할 때 작업 규모에 맞게 필요한 개수만큼 짧은 한국어 Todo 체크리스트(- [ ] 대기, - [/] 진행 중, - [x] 완료)를 먼저 작성하고 단계별로 하나씩 완료(- [x])하며 진행하세요. 오퍼레이터(agent-desk)에게는 orca orchestration reply를 절대 실행하지 말고 채팅으로만 바로 답하세요.]`;
+  const bodyWithTodoRule = `${text}\n\n[진행 지시: ask_user 등 선택지·질문 팝업 도구는 절대 호출하지 마세요. 이 작업을 시작할 때 작업 규모에 맞게 필요한 개수만큼 짧은 한국어 Todo 체크리스트(- [ ] 대기, - [/] 진행 중, - [x] 완료)를 먼저 작성하고 단계별로 하나씩 완료(- [x])하며 진행하세요. 오퍼레이터(agent-desk)에게는 orca orchestration reply를 절대 실행하지 말고 채팅으로만 바로 답하세요.]`;
   const record = {
     id: `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     at: new Date().toISOString(),
@@ -1065,9 +1089,10 @@ async function sendDeskMessage(body) {
     delivered: false,
   };
 
-  const fromHandle = source
-    ? source.terminalHandle || (source.orcaSessionId ? `orca_session_id:${source.orcaSessionId}` : '')
-    : 'agent-desk';
+  // Orca rejects `--from orca_session_id:<id>` for chat sessions
+  // (`session_caller_chat_not_declarable`), so only terminal handles can be
+  // passed as `--from`; chat-originated handoffs are sent via `agent-desk`.
+  const fromHandle = source?.terminalHandle ? source.terminalHandle : 'agent-desk';
   try {
     await runOrca(
       [
@@ -1818,7 +1843,7 @@ function stripUserEnvelope(rawText) {
     if (/^Subject:\s*\[Desk\]/i.test(trimmed)) continue;
     if (/^\[Reply:\s*orca orchestration reply\b/i.test(trimmed)) continue;
     if (/^\[Agent Desk 공통 지시.*\]\s*[-—:]*\s*$/i.test(trimmed)) continue;
-    if (/^\[진행 지시:.*\]\s*$/i.test(trimmed)) continue;
+    if (/^\[(?:진행 지시|Agent Desk 지시):.*\]\s*$/i.test(trimmed)) continue;
     if (/^\[(워커|코디네이터|지휘자)\s*역할\]\s*$/i.test(trimmed)) continue;
     const attachMatch = trimmed.match(/^첨부 파일:\s*(.+)$/);
     if (attachMatch) {
@@ -1940,6 +1965,11 @@ async function sendTerminalMessage(body) {
   if (!text) throw new Error('보낼 메시지를 입력해 주세요.');
   if (text.length > 2_000) throw new Error('메시지는 2,000자 이하로 입력해 주세요.');
   if (!text.startsWith('/')) terminalSentPrompt.set(handle, text);
+  let outboundText = text;
+  if (!text.startsWith('/') && !terminalRuleSent.has(handle)) {
+    terminalRuleSent.add(handle);
+    outboundText = `${text}\n\n${TERMINAL_INLINE_RULE}`;
+  }
   // Freebuff's TUI can keep its draft even when the PTY receives Enter. A
   // mouse event restores the composer focus; without it text goes into the
   // draft but the agent never starts a turn. Plain shell terminals must not
@@ -1960,7 +1990,7 @@ async function sendTerminalMessage(body) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 120));
   }
 
-  const args = ['terminal', 'send', '--terminal', handle, '--text', text, '--enter'];
+  const args = ['terminal', 'send', '--terminal', handle, '--text', outboundText, '--enter'];
   if (waitForSubmit) args.push('--wait-submit', '8');
   args.push('--json');
   const result = await runOrca(args, 30_000);

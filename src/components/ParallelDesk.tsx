@@ -667,6 +667,9 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
             <span>Orca 워크트리와 에이전트를 불러옵니다.</span>
           </div>
           <Loader2 size={18} className="spin" />
+          <button className="desk-icon" onClick={onClose} aria-label="채팅으로 돌아가기">
+            <ArrowLeft size={18} />
+          </button>
         </div>
       </div>
     );

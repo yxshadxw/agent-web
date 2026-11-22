@@ -139,7 +139,7 @@ export function cleanUserMessage(raw: string): string {
     !/^─+\s*From:/i.test(text) &&
     !/^Subject:\s*\[Desk\]/i.test(text) &&
     !/^\[(?:Agent Desk 공통 지시|워커 역할|코디네이터 역할)/i.test(text) &&
-    !/\[진행 지시:/i.test(text)
+    !/\[(?:진행 지시|Agent Desk 지시):/i.test(text)
   ) {
     return text;
   }
@@ -155,7 +155,7 @@ export function cleanUserMessage(raw: string): string {
     if (/^Subject:\s*\[Desk\]/i.test(trimmed)) continue;
     if (/^\[Reply:\s*orca orchestration reply\b/i.test(trimmed)) continue;
     if (/^\[Agent Desk 공통 지시.*\]\s*[-—:]*\s*$/i.test(trimmed)) continue;
-    if (/^\[진행 지시:.*\]\s*$/i.test(trimmed)) continue;
+    if (/^\[(?:진행 지시|Agent Desk 지시):.*\]\s*$/i.test(trimmed)) continue;
     if (/^\[(워커|코디네이터|지휘자)\s*역할\]\s*$/i.test(trimmed)) continue;
     const attachMatch = trimmed.match(/^첨부 파일:\s*(.+)$/);
     if (attachMatch) {
