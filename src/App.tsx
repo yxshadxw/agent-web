@@ -1,16 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import anime from 'animejs';
 import { Check, Loader2, Lock, RefreshCw, User, WifiOff, X } from 'lucide-react';
 import { Header } from './components/Header';
 import { Timeline } from './components/Timeline';
 import { Composer, type Attachment } from './components/Composer';
 import { AutoList, ContextSheet, ModelList, ReasonList, UsageSheet, type UnifiedModelGroup } from './components/Sheets';
-import { InfoPanel, type TeamTreeAgent } from './components/InfoPanel';
+import type { TeamTreeAgent } from './components/InfoPanel';
 import { deriveTodosFromTools } from './components/TodoBar';
-import { SettingsPanel } from './components/SettingsPanel';
-import { ParallelDesk } from './components/ParallelDesk';
-import { CodexPanel, type CodexPanelState } from './components/CodexPanel';
+import type { CodexPanelState } from './components/CodexPanel';
 import { Sidebar } from './components/Sidebar';
+
+const InfoPanel = lazy(() =>
+  import('./components/InfoPanel').then((m) => ({ default: m.InfoPanel })),
+);
+const SettingsPanel = lazy(() =>
+  import('./components/SettingsPanel').then((m) => ({ default: m.SettingsPanel })),
+);
+const ParallelDesk = lazy(() =>
+  import('./components/ParallelDesk').then((m) => ({ default: m.ParallelDesk })),
+);
+const CodexPanel = lazy(() =>
+  import('./components/CodexPanel').then((m) => ({ default: m.CodexPanel })),
+);
 import { BrandGlyph } from './components/Brand';
 import { useAgent } from './hooks/useAgent';
 import { useAgyQuota } from './hooks/useQuota';
@@ -586,6 +597,60 @@ export default function App() {
     setSettingsOpen(false);
   }, [agent]);
 
+  const [infoLoaded, setInfoLoaded] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  useEffect(() => {
+    if (infoOpen) setInfoLoaded(true);
+  }, [infoOpen]);
+  useEffect(() => {
+    if (settingsOpen) setSettingsLoaded(true);
+  }, [settingsOpen]);
+
+  const derivedTodos = useMemo(() => {
+    if (agent.todos.length > 0) return agent.todos;
+    let lastUserIdx = -1;
+    for (let i = agent.messages.length - 1; i >= 0; i -= 1) {
+      if (agent.messages[i].info.role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    const turnMessages =
+      lastUserIdx >= 0 ? agent.messages.slice(lastUserIdx + 1) : agent.messages;
+    return deriveTodosFromTools(
+      turnMessages.flatMap((m) =>
+        m.info.role === 'assistant'
+          ? m.parts.flatMap((p) => {
+              if (p.type !== 'tool') return [];
+              const inp = (p.state.input || {}) as Record<string, unknown>;
+              const detail =
+                (typeof inp.command === 'string' && inp.command) ||
+                (typeof inp.filePath === 'string' && inp.filePath) ||
+                (typeof inp.path === 'string' && inp.path) ||
+                (typeof inp.query === 'string' && inp.query) ||
+                p.tool;
+              return [
+                {
+                  id: p.id,
+                  tool: p.tool,
+                  detail,
+                  status: p.state.status,
+                },
+              ];
+            })
+          : [],
+      ),
+      turnMessages.flatMap((m) =>
+        m.info.role === 'assistant'
+          ? m.parts.flatMap((p) =>
+              p.type === 'text' || p.type === 'reasoning' ? [p.text] : [],
+            )
+          : [],
+      ),
+      agent.busy,
+    );
+  }, [agent.todos, agent.messages, agent.busy]);
+
   if (agent.auth === 'checking') {
     return (
       <div className="stage">
@@ -643,7 +708,24 @@ export default function App() {
   }
 
   if (deskOpen) {
-    return <ParallelDesk onClose={() => setDeskOpen(false)} />;
+    return (
+      <Suspense
+        fallback={
+          <div className="stage">
+            <div className="phone login-phone">
+              <div className="login-screen">
+                <div className="login-loading">
+                  <Loader2 size={17} className="spin" />
+                  병렬 데스크 불러오는 중…
+                </div>
+              </div>
+            </div>
+          </div>
+        }
+      >
+        <ParallelDesk onClose={() => setDeskOpen(false)} />
+      </Suspense>
+    );
   }
 
   const composerPanel =
@@ -752,15 +834,26 @@ export default function App() {
         />
 
         {codexScreen ? (
-          <CodexPanel
-            embedded
-            onClose={codexMode ? undefined : () => setCodexOpen(false)}
-            statsOpen={codexStatsOpen}
-            onStatsOpen={setCodexStatsOpen}
-            onOpenInfo={() => openInfo('info')}
-            onStateChange={setCodexState}
-            resetKey={codexResetKey}
-          />
+          <Suspense
+            fallback={
+              <main className="scroller">
+                <div className="login-loading" style={{ margin: 'auto' }}>
+                  <Loader2 size={17} className="spin" />
+                  Codex 불러오는 중…
+                </div>
+              </main>
+            }
+          >
+            <CodexPanel
+              embedded
+              onClose={codexMode ? undefined : () => setCodexOpen(false)}
+              statsOpen={codexStatsOpen}
+              onStatsOpen={setCodexStatsOpen}
+              onOpenInfo={() => openInfo('info')}
+              onStateChange={setCodexState}
+              resetKey={codexResetKey}
+            />
+          </Suspense>
         ) : (
         <main
           className="scroller"
@@ -810,55 +903,7 @@ export default function App() {
           variant={agent.model.variant}
           hasVariants={hasVariants}
           elapsed={elapsed}
-          todos={
-            agent.todos.length > 0
-              ? agent.todos
-              : (() => {
-                  let lastUserIdx = -1;
-                  for (let i = agent.messages.length - 1; i >= 0; i -= 1) {
-                    if (agent.messages[i].info.role === 'user') {
-                      lastUserIdx = i;
-                      break;
-                    }
-                  }
-                  const turnMessages =
-                    lastUserIdx >= 0
-                      ? agent.messages.slice(lastUserIdx + 1)
-                      : agent.messages;
-                  return deriveTodosFromTools(
-                    turnMessages.flatMap((m) =>
-                      m.info.role === 'assistant'
-                        ? m.parts.flatMap((p) => {
-                            if (p.type !== 'tool') return [];
-                            const inp = (p.state.input || {}) as Record<string, unknown>;
-                            const detail =
-                              (typeof inp.command === 'string' && inp.command) ||
-                              (typeof inp.filePath === 'string' && inp.filePath) ||
-                              (typeof inp.path === 'string' && inp.path) ||
-                              (typeof inp.query === 'string' && inp.query) ||
-                              p.tool;
-                            return [
-                              {
-                                id: p.id,
-                                tool: p.tool,
-                                detail,
-                                status: p.state.status,
-                              },
-                            ];
-                          })
-                        : [],
-                    ),
-                    turnMessages.flatMap((m) =>
-                      m.info.role === 'assistant'
-                        ? m.parts.flatMap((p) =>
-                            p.type === 'text' || p.type === 'reasoning' ? [p.text] : [],
-                          )
-                        : [],
-                    ),
-                    agent.busy,
-                  ) as any;
-                })()
-          }
+          todos={derivedTodos as any}
           autoApprove={agent.autoApprove}
           panel={panel}
           onPanel={setPanel}
@@ -871,64 +916,68 @@ export default function App() {
         )}
       </div>
 
-      <InfoPanel
-        open={infoOpen}
-        tab={infoTab}
-        onTab={setInfoTab}
-        onClose={() => setInfoOpen(false)}
-        session={
-          codexScreen
-            ? {
-                id: codexState?.threadId || 'codex-local',
-                title: codexTitle || 'Codex 채팅',
-                directory: agent.session?.directory || agent.pathInfo?.worktree || '',
-                agent: 'codex',
-                time: {
-                  created: session?.time.created || Date.now(),
-                  updated: Date.now(),
-                },
-                version: '1',
-                projectID: session?.projectID || 'codex',
-              }
-            : session
-        }
-        parentSession={codexScreen ? null : parentSession}
-        messages={codexScreen ? [] : agent.messages}
-        diffs={codexScreen && worktreeDiff ? worktreeDiff.diffs : agent.diffs}
-        children={codexScreen ? [] : agent.children}
-        gitFiles={codexScreen && worktreeDiff ? worktreeDiff.files : agent.gitFiles}
-        vcs={
-          codexScreen && worktreeDiff?.branch
-            ? { branch: worktreeDiff.branch, default_branch: agent.vcs?.default_branch }
-            : agent.vcs
-        }
-        pathInfo={agent.pathInfo}
-        providers={codexScreen ? 'OpenAI / Claude CLI' : providerName}
-        modelName={codexScreen ? codexState?.modelLabel || 'GPT-6 Luna' : modelName}
-        effort={codexScreen ? codexState?.effort : agent.model.variant}
-        contextLimit={codexScreen ? codexState?.usage?.contextWindow || 272_000 : contextLimit}
-        contextUsed={codexScreen ? codexState?.usage?.context || 0 : undefined}
-        tokenOverride={
-          codexScreen && codexState?.usage
-            ? {
-                input: codexState.usage.input,
-                output: codexState.usage.output,
-                reasoning: codexState.usage.reasoning,
-                cache: { read: codexState.usage.cached, write: 0 },
-              }
-            : undefined
-        }
-        activeEngine={codexScreen ? 'codex' : engine}
-        codexQuota={codexState?.quota ?? undefined}
-        teamAgents={teamAgents}
-        quota={quotaState.quota}
-        quotaLoading={quotaState.loading}
-        onRefreshQuota={quotaState.refresh}
-        pinned={pins}
-        onTogglePin={togglePin}
-        onOpenSession={(id) => void selectSession(id)}
-        onToast={showToast}
-      />
+      {infoLoaded && (
+        <Suspense fallback={null}>
+          <InfoPanel
+            open={infoOpen}
+            tab={infoTab}
+            onTab={setInfoTab}
+            onClose={() => setInfoOpen(false)}
+            session={
+              codexScreen
+                ? {
+                    id: codexState?.threadId || 'codex-local',
+                    title: codexTitle || 'Codex 채팅',
+                    directory: agent.session?.directory || agent.pathInfo?.worktree || '',
+                    agent: 'codex',
+                    time: {
+                      created: session?.time.created || Date.now(),
+                      updated: Date.now(),
+                    },
+                    version: '1',
+                    projectID: session?.projectID || 'codex',
+                  }
+                : session
+            }
+            parentSession={codexScreen ? null : parentSession}
+            messages={codexScreen ? [] : agent.messages}
+            diffs={codexScreen && worktreeDiff ? worktreeDiff.diffs : agent.diffs}
+            children={codexScreen ? [] : agent.children}
+            gitFiles={codexScreen && worktreeDiff ? worktreeDiff.files : agent.gitFiles}
+            vcs={
+              codexScreen && worktreeDiff?.branch
+                ? { branch: worktreeDiff.branch, default_branch: agent.vcs?.default_branch }
+                : agent.vcs
+            }
+            pathInfo={agent.pathInfo}
+            providers={codexScreen ? 'OpenAI / Claude CLI' : providerName}
+            modelName={codexScreen ? codexState?.modelLabel || 'GPT-6 Luna' : modelName}
+            effort={codexScreen ? codexState?.effort : agent.model.variant}
+            contextLimit={codexScreen ? codexState?.usage?.contextWindow || 272_000 : contextLimit}
+            contextUsed={codexScreen ? codexState?.usage?.context || 0 : undefined}
+            tokenOverride={
+              codexScreen && codexState?.usage
+                ? {
+                    input: codexState.usage.input,
+                    output: codexState.usage.output,
+                    reasoning: codexState.usage.reasoning,
+                    cache: { read: codexState.usage.cached, write: 0 },
+                  }
+                : undefined
+            }
+            activeEngine={codexScreen ? 'codex' : engine}
+            codexQuota={codexState?.quota ?? undefined}
+            teamAgents={teamAgents}
+            quota={quotaState.quota}
+            quotaLoading={quotaState.loading}
+            onRefreshQuota={quotaState.refresh}
+            pinned={pins}
+            onTogglePin={togglePin}
+            onOpenSession={(id) => void selectSession(id)}
+            onToast={showToast}
+          />
+        </Suspense>
+      )}
 
       <Sidebar
         open={sidebarOpen}
@@ -946,23 +995,27 @@ export default function App() {
         onToast={showToast}
       />
 
-      <SettingsPanel
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        modelName={modelName}
-        connection={agent.connection}
-        pinnedCount={pins.length}
-        onOpenInfo={() => {
-          setSettingsOpen(false);
-          setInfoTab('pin');
-          setInfoOpen(true);
-        }}
-        onOpenModel={() => {
-          setSettingsOpen(false);
-          setPanel('model');
-        }}
-        onLogout={() => void logout()}
-      />
+      {settingsLoaded && (
+        <Suspense fallback={null}>
+          <SettingsPanel
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            modelName={modelName}
+            connection={agent.connection}
+            pinnedCount={pins.length}
+            onOpenInfo={() => {
+              setSettingsOpen(false);
+              setInfoTab('pin');
+              setInfoOpen(true);
+            }}
+            onOpenModel={() => {
+              setSettingsOpen(false);
+              setPanel('model');
+            }}
+            onLogout={() => void logout()}
+          />
+        </Suspense>
+      )}
 
       {toast && (
         <div className="toast" role="status">

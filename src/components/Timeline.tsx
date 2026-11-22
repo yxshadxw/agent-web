@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import type {
@@ -62,7 +62,7 @@ type Props = {
   canFork: boolean;
 };
 
-export function Timeline({
+export const Timeline = memo(function Timeline({
   messages,
   busy,
   error,
@@ -171,7 +171,7 @@ export function Timeline({
       )}
     </div>
   );
-}
+});
 
 function UserMessage({
   message,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -121,15 +121,16 @@ function CodexMarkdown({
   text: string;
   className?: string;
 }) {
-  const html = marked.parse(text, { gfm: true, breaks: true }) as string;
+  const html = useMemo(() => {
+    const parsed = marked.parse(text, { gfm: true, breaks: true }) as string;
+    return highlightQuotaWarningsHtml(
+      DOMPurify.sanitize(parsed, { FORBID_TAGS: ['style', 'form', 'input'] }),
+    );
+  }, [text]);
   return (
     <div
       className={className}
-      dangerouslySetInnerHTML={{
-        __html: highlightQuotaWarningsHtml(
-          DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input'] }),
-        ),
-      }}
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }
@@ -767,6 +768,18 @@ export function CodexPanel({
     }
   };
 
+  const codexTodos = useMemo(() => {
+    const latestAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    const latestTools = liveTurn?.tools.length
+      ? liveTurn.tools
+      : latestAssistant?.tools || [];
+    const latestTexts = [
+      ...(latestAssistant ? [latestAssistant.reasoning || '', latestAssistant.text || ''] : []),
+      ...(liveTurn ? [liveTurn.reasoning || '', liveTurn.text || ''] : []),
+    ];
+    return deriveTodosFromTools(latestTools, latestTexts, busy);
+  }, [messages, liveTurn, busy]);
+
   const panel = (
       <section
         className={`codex-panel ${embedded ? 'codex-embedded' : ''} ${standalone ? 'codex-standalone' : ''}`}
@@ -1100,18 +1113,9 @@ export function CodexPanel({
         )}
 
         <div className={`codex-compose ${settingsPanel ? 'settings-open' : ''}`}>
-          {!settingsPanel && !statsVisible && !permissionOpen && (() => {
-            const latestAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-            const latestTools = liveTurn?.tools.length
-              ? liveTurn.tools
-              : latestAssistant?.tools || [];
-            const latestTexts = [
-              ...(latestAssistant ? [latestAssistant.reasoning || '', latestAssistant.text || ''] : []),
-              ...(liveTurn ? [liveTurn.reasoning || '', liveTurn.text || ''] : []),
-            ];
-            const codexTodos = deriveTodosFromTools(latestTools, latestTexts, busy);
-            return <TodoBar todos={codexTodos} />;
-          })()}
+          {!settingsPanel && !statsVisible && !permissionOpen && (
+            <TodoBar todos={codexTodos} />
+          )}
           {settingsPanel && !statsVisible && !permissionOpen && (
             <div
               className={`inline-panel codex-settings-panel ${settingsClosing ? 'is-closing' : ''}`}

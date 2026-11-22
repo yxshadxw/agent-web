@@ -7848,3 +7848,23 @@ a {
   border-color: rgba(242, 118, 58, 0.4);
   transform: translateY(-1px);
 }
+
+/* Parallel desk scroll containment, touch ergonomics, and off-screen paint culling. */
+.desk-stage button,
+.desk-stage summary {
+  touch-action: manipulation;
+}
+
+.desk-terminal-body,
+.desk-agent-list,
+.desk-sidebar-body {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.desk-freebuff-msg,
+.desk-freebuff-agent,
+.desk-tool-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}

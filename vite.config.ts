@@ -178,6 +178,18 @@ const proxy = {
 
 export default defineConfig({
   plugins: [react(), accessGuard(), codexChat()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-markdown': ['marked', 'dompurify', 'diff'],
+          'vendor-anime': ['animejs'],
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

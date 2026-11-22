@@ -3870,6 +3870,53 @@ function LogDrawer({
     if (observedFreebuffTimeLeft) setFreebuffTimeLeft(observedFreebuffTimeLeft);
   }, [observedFreebuffTimeLeft]);
   const freebuffTimeLabel = freebuffTimeLeft;
+  const fbTodos = useMemo(() => {
+    let lastUserIdx = -1;
+    for (let i = freebuffSessionEntries.length - 1; i >= 0; i -= 1) {
+      const item = freebuffSessionEntries[i];
+      if (item.kind === 'message' && item.role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    const turnEntries =
+      lastUserIdx >= 0
+        ? freebuffSessionEntries.slice(lastUserIdx + 1)
+        : freebuffSessionEntries;
+    const fbTools = turnEntries.filter(
+      (e): e is Extract<FreebuffSessionEntry, { kind: 'tool' }> => e.kind === 'tool',
+    );
+    const fbTexts = turnEntries.flatMap((e) =>
+      (e.kind === 'message' && e.role === 'assistant') || e.kind === 'thinking'
+        ? [e.text]
+        : [],
+    );
+    return deriveTodosFromTools(fbTools, fbTexts, isThinking);
+  }, [freebuffSessionEntries, isThinking]);
+
+  const agyTodos = useMemo(() => {
+    let lastUserIdx = -1;
+    for (let i = agyEntries.length - 1; i >= 0; i -= 1) {
+      const item = agyEntries[i];
+      if (item.kind === 'message' && item.role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    const turnEntries =
+      lastUserIdx >= 0 ? agyEntries.slice(lastUserIdx + 1) : agyEntries;
+    const agyTools = turnEntries.filter((e) => e.kind === 'tool');
+    const agyTexts = turnEntries
+      .filter(
+        (e) =>
+          (e.kind === 'message' && e.role === 'assistant') ||
+          e.kind === 'thinking' ||
+          e.kind === 'reasoning',
+      )
+      .map((e) => e.text || '');
+    return deriveTodosFromTools(agyTools, agyTexts, isThinking);
+  }, [agyEntries, isThinking]);
+
   const handoffBrief = useMemo(
     () =>
       buildHandoffBrief(
@@ -4132,13 +4179,33 @@ function LogDrawer({
           .transcript(expectedSessionId)
           .then((next) => {
             if (next.orcaSessionId && next.orcaSessionId !== expectedSessionId) return;
-            setTranscript((current) =>
-              current &&
-              current.entries.length > 0 &&
-              (!next.entries || next.entries.length === 0)
-                ? current
-                : next,
-            );
+            setTranscript((current) => {
+              if (!current) return next;
+              if (
+                current.entries.length > 0 &&
+                (!next.entries || next.entries.length === 0)
+              ) {
+                return current;
+              }
+              if (
+                current.state === next.state &&
+                current.model === next.model &&
+                current.effort === next.effort &&
+                current.entries.length === next.entries.length
+              ) {
+                const lastCur = current.entries[current.entries.length - 1];
+                const lastNext = next.entries[next.entries.length - 1];
+                if (
+                  lastCur?.kind === lastNext?.kind &&
+                  lastCur?.text === lastNext?.text &&
+                  lastCur?.state === lastNext?.state &&
+                  lastCur?.detail === lastNext?.detail
+                ) {
+                  return current;
+                }
+              }
+              return next;
+            });
           })
           .catch(() => undefined);
       }
@@ -4836,30 +4903,7 @@ function LogDrawer({
 
         {isFreebuff && (
           <form className="desk-log-compose desk-freebuff-compose" onSubmit={sendReply}>
-            {!freebuffPanel && (() => {
-              let lastUserIdx = -1;
-              for (let i = freebuffSessionEntries.length - 1; i >= 0; i -= 1) {
-                const item = freebuffSessionEntries[i];
-                if (item.kind === 'message' && item.role === 'user') {
-                  lastUserIdx = i;
-                  break;
-                }
-              }
-              const turnEntries =
-                lastUserIdx >= 0
-                  ? freebuffSessionEntries.slice(lastUserIdx + 1)
-                  : freebuffSessionEntries;
-              const fbTools = turnEntries.filter(
-                (e): e is Extract<FreebuffSessionEntry, { kind: 'tool' }> => e.kind === 'tool',
-              );
-              const fbTexts = turnEntries.flatMap((e) =>
-                (e.kind === 'message' && e.role === 'assistant') || e.kind === 'thinking'
-                  ? [e.text]
-                  : [],
-              );
-              const fbTodos = deriveTodosFromTools(fbTools, fbTexts, isThinking);
-              return <TodoBar todos={fbTodos} onToast={notify} />;
-            })()}
+            {!freebuffPanel && <TodoBar todos={fbTodos} onToast={notify} />}
             <div
               className={`desk-freebuff-compose-shell ${freebuffPanel ? 'is-expanded' : ''} ${dragActive ? 'is-dragging' : ''}`}
               onDragEnter={(event) => {
@@ -5180,29 +5224,7 @@ function LogDrawer({
             onDragLeave={() => setDragActive(false)}
             onDrop={dropFile}
           >
-            {!agyPickerOpen && !agyUsageOpen && (() => {
-              let lastUserIdx = -1;
-              for (let i = agyEntries.length - 1; i >= 0; i -= 1) {
-                const item = agyEntries[i];
-                if (item.kind === 'message' && item.role === 'user') {
-                  lastUserIdx = i;
-                  break;
-                }
-              }
-              const turnEntries =
-                lastUserIdx >= 0 ? agyEntries.slice(lastUserIdx + 1) : agyEntries;
-              const agyTools = turnEntries.filter((e) => e.kind === 'tool');
-              const agyTexts = turnEntries
-                .filter(
-                  (e) =>
-                    (e.kind === 'message' && e.role === 'assistant') ||
-                    e.kind === 'thinking' ||
-                    e.kind === 'reasoning',
-                )
-                .map((e) => e.text || '');
-              const agyTodos = deriveTodosFromTools(agyTools, agyTexts, isThinking);
-              return <TodoBar todos={agyTodos} onToast={notify} />;
-            })()}
+            {!agyPickerOpen && !agyUsageOpen && <TodoBar todos={agyTodos} onToast={notify} />}
             <div className={`desk-freebuff-compose-shell ${(agyPickerOpen || agyUsageOpen) && (canPickModel || isAgyChat || isCodex || isClaude) ? 'is-expanded' : ''}`}>
             <div
               className={`desk-inline-expand ${agyUsageOpen && (isAgyChat || isCodex || isClaude) ? 'open' : ''}`}

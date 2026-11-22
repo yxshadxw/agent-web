@@ -4964,3 +4964,36 @@ button:disabled {
   color: #e6e2dd;
   background: #222226;
 }
+
+/* Interface responsiveness, touch ergonomics, and off-screen paint culling. */
+button,
+a,
+[role="button"],
+summary {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid rgba(242, 118, 58, 0.72);
+  outline-offset: 2px;
+}
+
+.scroller,
+.info-body,
+.codex-thread,
+.sidebar-body {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.msg-anim,
+.codex-msg {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
