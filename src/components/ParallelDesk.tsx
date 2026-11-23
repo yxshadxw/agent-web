@@ -363,35 +363,6 @@ function worktreeSubMeta(worktree: Pick<OrcaWorktree, 'displayName' | 'branch' |
   return pathText;
 }
 
-function freebuffRunningCommand(lines: string[]) {
-  const cleaned = lines.map((line) => line.replace(/[│┃]/g, ' ').trimEnd());
-  let start = -1;
-  for (let i = cleaned.length - 1; i >= 0; i -= 1) {
-    if (/^\s*\$ /.test(cleaned[i])) {
-      start = i;
-      break;
-    }
-  }
-  if (start < 0) return null;
-
-  const parts: string[] = [];
-  for (let i = start; i < cleaned.length; i += 1) {
-    const line = cleaned[i].replace(/^\s*\$ /, '').trim();
-    if (!line) continue;
-    if (i > start && /^working\.\.\./i.test(line)) break;
-    const timeout = line.match(/^(.*?)\s*\(\d+m timeout\)/i);
-    if (timeout) {
-      if (timeout[1].trim()) parts.push(timeout[1].trim());
-      break;
-    }
-    if (/^[─╭╮╰╯]+$/.test(line)) continue;
-    parts.push(line);
-  }
-
-  const command = parts.join(' ').replace(/\s+/g, ' ').trim();
-  return command ? command.slice(0, 600) : null;
-}
-
 function freebuffEntryKey(entry: FreebuffSessionEntry, index: number) {
   return entry.id || `fb-${entry.kind}-${index}`;
 }
@@ -4492,23 +4463,6 @@ function LogDrawer({
         : [],
     [freebuffSession],
   );
-  const freebuffPendingCommand = useMemo(() => {
-    if (!isFreebuff || isOpenCode || freebuffSession?.state !== 'working') return null;
-    if (snapshot?.status !== 'running') return null;
-    const last = freebuffSessionEntries[freebuffSessionEntries.length - 1];
-    if (!last) return null;
-    if (last.kind === 'tool' || last.kind === 'error') return null;
-    if (last.kind === 'message' && last.role !== 'assistant') return null;
-
-    const command = freebuffRunningCommand(snapshot?.tail ?? []);
-    if (!command) return null;
-    const lastTool = [...freebuffSessionEntries].reverse().find(
-      (entry): entry is Extract<FreebuffSessionEntry, { kind: 'tool' }> => entry.kind === 'tool',
-    );
-    const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
-    if (lastTool && normalize(lastTool.command) === normalize(command)) return null;
-    return command;
-  }, [freebuffSession?.state, freebuffSessionEntries, isFreebuff, isOpenCode, snapshot]);
   const logNeedle = logQuery.trim().toLowerCase();
   const visibleFreebuffEntries = useMemo(() => {
     if (!logNeedle) return freebuffSessionEntries;
@@ -5988,7 +5942,7 @@ function LogDrawer({
                             key={freebuffEntryKey(entry, index)}
                             entry={entry}
                             live={isThinking && index === lastThinkingIndex}
-                            streaming={freebuffStreaming && index === lastThinkingIndex}
+                            streaming={freebuffHot && index === lastThinkingIndex}
                           />
                         );
                       }
@@ -6081,17 +6035,6 @@ function LogDrawer({
                         </details>
                       );
                     })}
-                    {freebuffPendingCommand && (
-                      <div className="desk-freebuff-pending">
-                        <span className="desk-tool-check running">
-                          <Loader2 size={12} className="spin" />
-                        </span>
-                        <div className="desk-freebuff-pending-copy">
-                          <span>도구 실행 중</span>
-                          <code>{freebuffPendingCommand}</code>
-                        </div>
-                      </div>
-                    )}
                     {logNeedle && visibleFreebuffEntries.length === 0 && (
                       <div className="desk-log-search-empty">
                         “{logQuery.trim()}”와 일치하는 기록이 없어요.

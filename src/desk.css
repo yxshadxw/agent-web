@@ -2499,6 +2499,8 @@
 
 .desk-log-head,
 .desk-drawer-head {
+  position: relative;
+  z-index: 30;
   flex: none;
   display: flex;
   align-items: flex-start;
@@ -2747,6 +2749,8 @@
 }
 
 .desk-log-body {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -9009,53 +9013,4 @@ a {
   .desk-tab {
     padding: 0 10px;
   }
-}
-
-/* Current terminal tool while Freebuff has not flushed its chat store yet. */
-.desk-freebuff-pending {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 8px 0;
-  padding: 11px 12px;
-  border: 1px solid rgba(240, 163, 61, 0.24);
-  border-radius: 13px;
-  background:
-    linear-gradient(120deg, rgba(240, 163, 61, 0.06), transparent 48%),
-    rgba(17, 17, 19, 0.82);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-}
-
-.desk-freebuff-pending > .desk-tool-check {
-  flex: none;
-  margin-top: 1px;
-  color: #f0a33d;
-  background: rgba(240, 163, 61, 0.11);
-}
-
-.desk-freebuff-pending-copy {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.desk-freebuff-pending-copy > span {
-  color: #e8b175;
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.desk-freebuff-pending-copy code {
-  max-height: 92px;
-  overflow: auto;
-  color: #d4c9c0;
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
