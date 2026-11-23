@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import anime from 'animejs';
 import { Check, Loader2, Lock, RefreshCw, User, WifiOff, X } from 'lucide-react';
+import { AmbientBackdrop } from './components/AmbientBackdrop';
 import { Header } from './components/Header';
 import { Timeline } from './components/Timeline';
 import { Composer, type Attachment } from './components/Composer';
@@ -623,7 +624,12 @@ export default function App() {
           ? m.parts.flatMap((p) => {
               if (p.type !== 'tool') return [];
               const inp = (p.state.input || {}) as Record<string, unknown>;
+              const structuredTodo =
+                /todo/i.test(p.tool) && Array.isArray(inp.todos)
+                  ? JSON.stringify(inp)
+                  : '';
               const detail =
+                structuredTodo ||
                 (typeof inp.command === 'string' && inp.command) ||
                 (typeof inp.filePath === 'string' && inp.filePath) ||
                 (typeof inp.path === 'string' && inp.path) ||
@@ -799,6 +805,7 @@ export default function App() {
 
   return (
     <div className="stage">
+      <AmbientBackdrop className="is-chat" />
       <div className="phone">
         <Header
           session={session}
@@ -904,6 +911,7 @@ export default function App() {
           hasVariants={hasVariants}
           elapsed={elapsed}
           todos={derivedTodos as any}
+          todoStorageKey={session?.id || 'chat'}
           autoApprove={agent.autoApprove}
           panel={panel}
           onPanel={setPanel}
@@ -1055,6 +1063,7 @@ function LoginScreen({
 
   return (
     <div className="stage">
+      <AmbientBackdrop className="is-login" />
       <div className="phone login-phone">
         <div className="login-screen">
           <div className="login-mark">

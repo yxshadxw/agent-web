@@ -32,6 +32,7 @@ type Props = {
   hasVariants: boolean;
   elapsed: number;
   todos: Todo[];
+  todoStorageKey?: string;
   autoApprove: boolean;
   panel: ComposerPanel;
   onPanel: (panel: ComposerPanel) => void;
@@ -57,6 +58,7 @@ export function Composer({
   hasVariants,
   elapsed,
   todos,
+  todoStorageKey,
   autoApprove,
   panel,
   onPanel,
@@ -121,7 +123,9 @@ export function Composer({
     };
   }, [panel, onPanel]);
 
-      {!panel && <TodoBar todos={todos} onToast={onToast} />}
+      {!panel && (
+        <TodoBar todos={todos} onToast={onToast} storageKey={todoStorageKey} />
+      )}
 
   const addFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -196,7 +200,9 @@ export function Composer({
         addFiles(event.dataTransfer.files);
       }}
     >
-      {!panel && <TodoBar todos={todos} onToast={onToast} />}
+      {!panel && (
+        <TodoBar todos={todos} onToast={onToast} storageKey={todoStorageKey} />
+      )}
 
       {!panel && attachments.length > 0 && (
         <div className="attach-tray">

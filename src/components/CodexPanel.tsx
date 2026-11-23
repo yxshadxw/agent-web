@@ -1114,7 +1114,7 @@ export function CodexPanel({
 
         <div className={`codex-compose ${settingsPanel ? 'settings-open' : ''}`}>
           {!settingsPanel && !statsVisible && !permissionOpen && (
-            <TodoBar todos={codexTodos} />
+            <TodoBar todos={codexTodos} storageKey="codex" />
           )}
           {settingsPanel && !statsVisible && !permissionOpen && (
             <div

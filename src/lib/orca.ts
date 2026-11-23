@@ -123,14 +123,23 @@ export type TerminalSnapshot = {
 };
 
 export type FreebuffSessionEntry =
-  | { kind: 'message'; role: 'user' | 'assistant'; text: string; at?: string }
-  | { kind: 'thinking'; text: string; at?: string }
+  | { kind: 'message'; role: 'user' | 'assistant'; id?: string; text: string; at?: string }
+  | { kind: 'thinking'; id?: string; text: string; at?: string }
+  | { kind: 'error'; id?: string; text: string; at?: string; title?: string }
   | {
       kind: 'tool';
+      id?: string;
       name: string;
       command: string;
+      file?: string;
+      oldText?: string;
+      newText?: string;
+      diff?: string;
+      additions?: number;
+      deletions?: number;
       output?: string;
       running?: boolean;
+      error?: boolean;
       at?: string;
     };
 
@@ -141,6 +150,7 @@ export type FreebuffSessionPayload = {
   state?: string;
   entries: FreebuffSessionEntry[];
   truncated?: boolean;
+  unchanged?: boolean;
   fetchedAt?: string;
   error?: string;
 };

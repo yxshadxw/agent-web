@@ -7,12 +7,13 @@
  */
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { diffLines } from 'diff';
 
 const execFileAsync = promisify(execFile);
 const extraPathDirs = [
@@ -47,6 +48,7 @@ const FREEBUFF_SESSION_ENTRY_LIMIT = 1_000;
 const FREEBUFF_SESSION_TEXT_MAX = 120_000;
 const FREEBUFF_SESSION_OUTPUT_MAX = 60_000;
 const freebuffSessionCache = new Map();
+const freebuffActivityCache = new Map();
 const terminalHandleChat = new Map();
 const terminalLaunchAt = new Map();
 const terminalSentPrompt = new Map();
@@ -62,6 +64,25 @@ function isChatBoundElsewhere(chatId, handle) {
   if (!chatId) return false;
   for (const [otherHandle, boundId] of terminalHandleChat.entries()) {
     if (boundId === chatId && otherHandle !== handle) return true;
+  }
+  return false;
+}
+
+async function isChatBoundToLiveElsewhere(chatId, handle) {
+  if (!chatId || !handle) return false;
+  for (const [otherHandle, boundId] of [...terminalHandleChat.entries()]) {
+    if (otherHandle === handle || boundId !== chatId) continue;
+    try {
+      const snap = await readTerminal(otherHandle, { screen: true, limit: 40 });
+      const status = String(snap?.status || '').toLowerCase();
+      if (!/dead|closed|exited|stopped|offline|disconnect|lost|error/.test(status)) {
+        return true;
+      }
+    } catch {
+      // The old terminal is gone; a reopened Freebuff terminal may reuse the
+      // same chat and must be allowed to bind it.
+    }
+    terminalHandleChat.delete(otherHandle);
   }
   return false;
 }
@@ -1237,11 +1258,20 @@ function clipFreebuffSessionText(value, max) {
   return `${text.slice(0, max)}\n\n… (${omitted.toLocaleString('ko-KR')}자 생략)`;
 }
 
-function freebuffToolCommand(input) {
+function freebuffToolCommand(input, depth = 0) {
   if (typeof input === 'string') return input;
-  if (!input || typeof input !== 'object') return '';
-  for (const key of ['command', 'cmd', 'script']) {
+  if (!input || typeof input !== 'object' || depth > 3) return '';
+  // Freebuff wraps tool arguments differently across releases. Unwrap the
+  // common envelopes before falling back to raw JSON so a bash command is
+  // still shown as a command instead of an opaque object.
+  for (const key of ['command', 'cmd', 'script', 'shellCommand', 'commandLine', 'bash']) {
     if (typeof input[key] === 'string' && input[key].trim()) return input[key];
+  }
+  for (const key of ['input', 'args', 'arguments', 'parameters', 'toolInput']) {
+    if (input[key] && typeof input[key] === 'object') {
+      const nested = freebuffToolCommand(input[key], depth + 1);
+      if (nested) return nested;
+    }
   }
   try {
     return JSON.stringify(input, null, 2);
@@ -1250,73 +1280,276 @@ function freebuffToolCommand(input) {
   }
 }
 
-function normalizeFreebuffSessionEntries(messages) {
+function freebuffDiffStats(oldText, newText) {
+  let additions = 0;
+  let deletions = 0;
+  try {
+    for (const part of diffLines(oldText, newText)) {
+      const count =
+        typeof part.count === 'number'
+          ? part.count
+          : Math.max(1, String(part.value || '').replace(/\n$/, '').split('\n').length);
+      if (part.added) additions += count;
+      else if (part.removed) deletions += count;
+    }
+  } catch {
+    // A malformed edit payload should not hide the tool card.
+  }
+  return { additions, deletions };
+}
+
+function freebuffToolEdit(input, toolName) {
+  if (!input || typeof input !== 'object') return null;
+  const name = String(toolName || '').toLowerCase();
+  const text = (value) => (typeof value === 'string' ? value : '');
+  const path =
+    [input.path, input.file_path, input.file, input.TargetFile, input.AbsolutePath].find(
+      (value) => typeof value === 'string' && value.trim(),
+    ) || '';
+  let oldText = '';
+  let newText = '';
+
+  const replacements = Array.isArray(input.replacements) ? input.replacements : [];
+  if (replacements.length) {
+    oldText = replacements
+      .map((item) => text(item?.oldString ?? item?.old_string ?? item?.oldText ?? item?.target))
+      .join('\n');
+    newText = replacements
+      .map((item) => text(item?.newString ?? item?.new_string ?? item?.newText ?? item?.replacement))
+      .join('\n');
+  } else {
+    oldText = text(input.oldString ?? input.old_string ?? input.oldText ?? input.target);
+    newText = text(
+      input.newString ?? input.new_string ?? input.newText ?? input.replacement ?? input.newContent,
+    );
+  }
+
+  if (/write_file|write_to_file|create_file|edit_file|replace_file|str_replace/.test(name)) {
+    if (!oldText && !newText) {
+      newText = text(input.content ?? input.CodeContent ?? input.code ?? input.text);
+    }
+  } else {
+    return null;
+  }
+
+  if (!oldText && !newText) return null;
+  const clippedOld = oldText.slice(0, 12_000);
+  const clippedNew = newText.slice(0, 12_000);
+  return {
+    ...(path ? { file: path } : {}),
+    oldText: clippedOld,
+    newText: clippedNew,
+    ...freebuffDiffStats(clippedOld, clippedNew),
+  };
+}
+
+function freebuffErrorText(value) {
+  if (!value) return '';
+  if (typeof value === 'boolean') return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'object') {
+    for (const key of ['message', 'error', 'detail', 'text']) {
+      const text = freebuffErrorText(value[key]);
+      if (text) return text;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '';
+    }
+  }
+  return String(value).trim();
+}
+
+function normalizeFreebuffSessionEntries(messages, messageOffset = 0) {
   const entries = [];
-  for (const message of messages) {
+  for (const [localIndex, message] of messages.entries()) {
     if (!message || typeof message !== 'object') continue;
+    const messageIndex = messageOffset + localIndex;
+    const entryId = (suffix) => `${messageIndex}:${suffix}`;
     const variant = String(message.variant || message.role || '');
     const content = typeof message.content === 'string' ? message.content : '';
     const at = typeof message.timestamp === 'string' ? message.timestamp : undefined;
+    const messageError = freebuffErrorText(message.error);
+
     if (variant === 'user') {
       if (content.trim()) {
         entries.push({
           kind: 'message',
           role: 'user',
+          id: entryId('user'),
           at,
           text: clipFreebuffSessionText(content, FREEBUFF_SESSION_TEXT_MAX),
         });
       }
       continue;
     }
+
+    if (messageError) {
+      entries.push({
+        kind: 'error',
+        id: entryId('message-error'),
+        at,
+        text: clipFreebuffSessionText(messageError, FREEBUFF_SESSION_TEXT_MAX),
+      });
+    }
+
     const blocks = Array.isArray(message.blocks) ? message.blocks : [];
     if (!blocks.length) {
       if (content.trim()) {
         entries.push({
           kind: 'message',
           role: 'assistant',
+          id: entryId('assistant'),
           at,
           text: clipFreebuffSessionText(content, FREEBUFF_SESSION_TEXT_MAX),
         });
       }
       continue;
     }
-    for (const block of blocks) {
+
+    for (const [blockIndex, block] of blocks.entries()) {
       if (!block || typeof block !== 'object') continue;
+      const blockId = entryId(String(blockIndex));
       const type = String(block.type || '');
+      const blockError = freebuffErrorText(block.error);
+      const hasBlockError = block.error != null && block.error !== false;
+      const textValue =
+        typeof block.content === 'string'
+          ? block.content
+          : typeof block.text === 'string'
+            ? block.text
+            : '';
+
+      if (
+        type === 'tool' ||
+        Boolean(block.toolName) ||
+        (type === 'tool_call' && Boolean(block.name))
+      ) {
+        const rawOutput =
+          typeof block.output === 'string'
+            ? block.output
+            : block.output == null
+              ? ''
+              : JSON.stringify(block.output);
+        const output =
+          blockError && !rawOutput.includes(blockError)
+            ? `${rawOutput}${rawOutput ? '\n\n' : ''}${blockError}`
+            : rawOutput;
+        const status = String(block.status || '').toLowerCase();
+        const input = block.input ?? block.arguments ?? {};
+        const toolName = String(
+          block.toolName ||
+            block.name ||
+            (typeof block.tool === 'string' ? block.tool : '') ||
+            'tool',
+        );
+        entries.push({
+          kind: 'tool',
+          id: blockId,
+          at,
+          name: toolName,
+          command: freebuffToolCommand(input),
+          ...(freebuffToolEdit(input, toolName) || {}),
+          output: clipFreebuffSessionText(output, FREEBUFF_SESSION_OUTPUT_MAX),
+          running:
+            !hasBlockError &&
+            block.output == null &&
+            !/complete|success|finish|fail|error|cancel/.test(status),
+          error: hasBlockError || undefined,
+        });
+        continue;
+      }
+
+      if (type === 'error' || block.textType === 'error' || hasBlockError) {
+        const errorText = blockError || textValue || content;
+        if (errorText.trim()) {
+          entries.push({
+            kind: 'error',
+            id: blockId,
+            at,
+            text: clipFreebuffSessionText(errorText, FREEBUFF_SESSION_TEXT_MAX),
+          });
+        }
+        continue;
+      }
+
       if (type === 'text') {
-        const text = typeof block.content === 'string' ? block.content : '';
+        const text = textValue;
         if (!text.trim()) continue;
         if (block.textType === 'reasoning' || block.textType === 'thinking') {
-          entries.push({ kind: 'thinking', at, text: clipFreebuffSessionText(text, FREEBUFF_SESSION_TEXT_MAX) });
+          entries.push({
+            kind: 'thinking',
+            id: blockId,
+            at,
+            text: clipFreebuffSessionText(text, FREEBUFF_SESSION_TEXT_MAX),
+          });
         } else {
           entries.push({
             kind: 'message',
             role: 'assistant',
+            id: blockId,
             at,
             text: clipFreebuffSessionText(text, FREEBUFF_SESSION_TEXT_MAX),
           });
         }
         continue;
       }
-      if (type === 'tool' || block.toolName) {
-        const output =
-          typeof block.output === 'string'
-            ? block.output
-            : block.output == null
-              ? ''
-              : JSON.stringify(block.output);
-        entries.push({
-          kind: 'tool',
-          at,
-          name: String(block.toolName || block.name || 'tool'),
-          command: freebuffToolCommand(block.input),
-          output: clipFreebuffSessionText(output, FREEBUFF_SESSION_OUTPUT_MAX),
-          running: block.output == null && !block.error,
-        });
-      }
     }
   }
   return entries;
+}
+
+function freebuffWorkingFromLog(chatFile) {
+  const logFile = join(dirname(chatFile), 'log.jsonl');
+  let info;
+  try {
+    info = statSync(logFile);
+  } catch {
+    return { working: false, mtimeMs: 0 };
+  }
+  const cached = freebuffActivityCache.get(logFile);
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+    return cached;
+  }
+
+  let working = false;
+  try {
+    // Freebuff's chat store is only flushed after a model step completes, but
+    // log.jsonl writes `Start agent ...` when inference begins and `End ...`
+    // when it returns. Reading the last event lets the desk show `working`
+    // during the slow generation gap instead of waiting for the finished block.
+    const maxBytes = 128 * 1024;
+    const length = Math.min(info.size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    const fd = openSync(logFile, 'r');
+    try {
+      readSync(fd, buffer, 0, length, info.size - length);
+    } finally {
+      closeSync(fd);
+    }
+    const lines = buffer.toString('utf8').split('\n');
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (!line.includes('"msg":"Start agent ') && !line.includes('"msg":"End agent ')) {
+        continue;
+      }
+      const match = line.match(/"msg":"(Start|End) agent [^"]*? step \d+/);
+      if (!match) continue;
+      working = match[1] === 'Start';
+      break;
+    }
+  } catch {
+    working = false;
+  }
+
+  const result = { working, mtimeMs: info.mtimeMs, size: info.size };
+  freebuffActivityCache.set(logFile, result);
+  if (freebuffActivityCache.size > 24) {
+    const first = freebuffActivityCache.keys().next().value;
+    if (first) freebuffActivityCache.delete(first);
+  }
+  return result;
 }
 
 function freebuffProjectDirForPath(worktreePath) {
@@ -1364,6 +1597,16 @@ function opencodeEntries(messages) {
   for (const m of messages) {
     const role = m?.info?.role;
     const at = m?.info?.time?.created ? new Date(m.info.time.created).toISOString() : undefined;
+    if (m?.info?.error) {
+      const messageError = freebuffErrorText(m.info.error);
+      if (messageError) {
+        entries.push({
+          kind: 'error',
+          at,
+          text: clipFreebuffSessionText(messageError, FREEBUFF_SESSION_TEXT_MAX),
+        });
+      }
+    }
     for (const part of m?.parts || []) {
       if (part.type === 'text') {
         if (!String(part.text || '').trim() || part.synthetic) continue;
@@ -1372,12 +1615,18 @@ function opencodeEntries(messages) {
         if (String(part.text || '').trim()) entries.push({ kind: 'thinking', at, text: clipFreebuffSessionText(part.text, FREEBUFF_SESSION_TEXT_MAX) });
       } else if (part.type === 'tool') {
         const st = part.state || {};
-        const out = typeof st.output === 'string' ? st.output : st.error ? String(st.error) : '';
+        const out =
+          typeof st.output === 'string'
+            ? st.output
+            : st.error
+              ? freebuffErrorText(st.error)
+              : '';
         entries.push({
           kind: 'tool', at, name: String(part.tool || 'tool'),
           command: freebuffToolCommand(st.input),
           output: clipFreebuffSessionText(out, FREEBUFF_SESSION_OUTPUT_MAX),
           running: st.status === 'pending' || st.status === 'running',
+          error: st.status === 'error' || Boolean(st.error) || undefined,
         });
       }
     }
@@ -1450,10 +1699,28 @@ function listFreebuffChats(projectDir) {
   return chats;
 }
 
-function parseFreebuffFile(chat) {
+function parseFreebuffFile(chat, since = 0) {
   const fileStat = statSync(chat.file);
+  const activity = freebuffWorkingFromLog(chat.file);
+  const stateFor = (chatWorking) =>
+    activity.working || chatWorking ? 'working' : 'idle';
   const cached = freebuffSessionCache.get(chat.file);
+  if (cached && since && fileStat.mtimeMs <= since) {
+    // The client already has this exact file revision. Returning no entries
+    // keeps live polling cheap; state is still refreshed because the run log
+    // changes before and after the chat store is written.
+    const state = stateFor(Boolean(cached.chatWorking));
+    cached.payload = { ...cached.payload, state };
+    return {
+      ...cached.payload,
+      entries: [],
+      unchanged: true,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
   if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
+    const state = stateFor(Boolean(cached.chatWorking));
+    cached.payload = { ...cached.payload, state };
     return { ...cached.payload, fetchedAt: new Date().toISOString() };
   }
   const parsed = JSON.parse(readFileSync(chat.file, 'utf8'));
@@ -1462,16 +1729,21 @@ function parseFreebuffFile(chat) {
     : Array.isArray(parsed?.messages)
       ? parsed.messages
       : [];
+  const messageStart = Math.max(0, messages.length - FREEBUFF_SESSION_MESSAGE_LIMIT);
   const replayed = normalizeFreebuffSessionEntries(
-    messages.slice(-FREEBUFF_SESSION_MESSAGE_LIMIT),
+    messages.slice(messageStart),
+    messageStart,
   );
   const entries = replayed.slice(-FREEBUFF_SESSION_ENTRY_LIMIT);
   const last = messages[messages.length - 1];
+  // Current Freebuff stores `variant: ai` plus blocks and has no isComplete
+  // field. Keep supporting the older format, but never let it mask live work.
+  const chatWorking = Boolean(last && last.isComplete === false);
   const payload = {
     ok: true,
     chatId: chat.chatId,
     updatedAt: fileStat.mtimeMs,
-    state: last && last.isComplete === false ? 'working' : 'idle',
+    state: stateFor(chatWorking),
     entries,
     truncated:
       replayed.length > entries.length || messages.length > FREEBUFF_SESSION_MESSAGE_LIMIT,
@@ -1480,6 +1752,7 @@ function parseFreebuffFile(chat) {
   freebuffSessionCache.set(chat.file, {
     mtimeMs: fileStat.mtimeMs,
     size: fileStat.size,
+    chatWorking,
     payload,
   });
   if (freebuffSessionCache.size > 24) {
@@ -1505,13 +1778,16 @@ async function readFreebuffSession(rawPath, requestedChat, since = 0, handle = '
   if (effectiveChat) {
     if (handle) terminalHandleChat.set(handle, effectiveChat);
     const chat = findFreebuffChat(projectDir, effectiveChat);
-    return parseFreebuffFile(chat);
+    return parseFreebuffFile(chat, since);
   }
 
   const launchAt = (handle ? terminalLaunchAt.get(handle) : 0) || since || 0;
-  const chats = listFreebuffChats(projectDir).filter(
-    (c) => (!launchAt || c.mtimeMs >= launchAt) && !isChatBoundElsewhere(c.chatId, handle),
-  );
+  const chats = [];
+  for (const chat of listFreebuffChats(projectDir)) {
+    if (launchAt && chat.mtimeMs < launchAt) continue;
+    if (await isChatBoundToLiveElsewhere(chat.chatId, handle)) continue;
+    chats.push(chat);
+  }
   if (!chats.length) {
     return {
       ok: false,
@@ -1521,7 +1797,7 @@ async function readFreebuffSession(rawPath, requestedChat, since = 0, handle = '
     };
   }
   if (!handle) {
-    return parseFreebuffFile(chats[0]);
+    return parseFreebuffFile(chats[0], since);
   }
 
   const screenNorm = await readTerminalNorm(handle);
@@ -1533,12 +1809,14 @@ async function readFreebuffSession(rawPath, requestedChat, since = 0, handle = '
       return payload;
     }
   }
-  return {
-    ok: false,
-    entries: [],
-    error: '새 Freebuff 세션 대기 중입니다.',
-    fetchedAt: new Date().toISOString(),
-  };
+
+  // The TUI viewport only exposes the latest rows, so the user prompt for a
+  // resumed or long-running chat can be off-screen. The newest unbound chat
+  // for this live terminal is still the session the desk should render; do
+  // not fall back to raw terminal rows and lose every tool card.
+  const fallback = chats[0];
+  terminalHandleChat.set(handle, fallback.chatId);
+  return parseFreebuffFile(fallback);
 }
 
 const AGY_BRAIN_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'brain');

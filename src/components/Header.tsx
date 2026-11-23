@@ -10,7 +10,6 @@ import {
   Info,
   Menu,
   MoreHorizontal,
-  PanelRight,
   Pin,
   Plus,
   Settings,
@@ -168,9 +167,6 @@ export function Header({
           aria-expanded={menuOpen}
         >
           <MoreHorizontal size={21} />
-        </button>
-        <button className="icon-btn boxed" onClick={() => onOpenInfo()} aria-label="정보 패널 열기">
-          <PanelRight size={18} />
         </button>
       </div>
 

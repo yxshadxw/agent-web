@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Check, ChevronUp, Loader2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, ChevronUp, Loader2, Plus, Trash2, X } from 'lucide-react';
 
 export type TodoItem = {
   id: string;
@@ -7,31 +7,201 @@ export type TodoItem = {
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | string;
 };
 
+type ManualTodo = {
+  id: string;
+  content: string;
+  status: 'pending' | 'completed';
+  createdAt: number;
+};
+
+const MANUAL_TODO_PREFIX = 'agent-web:manual-todos:v1:';
+
+function manualKey(storageKey?: string) {
+  return `${MANUAL_TODO_PREFIX}${storageKey || 'default'}`;
+}
+
+function readManualTodos(storageKey?: string): ManualTodo[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(manualKey(storageKey));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      const content = typeof record.content === 'string' ? record.content.trim() : '';
+      if (!content || content.length > 360) return [];
+      return [
+        {
+          id:
+            typeof record.id === 'string' && record.id
+              ? record.id
+              : `manual-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          content,
+          status: record.status === 'completed' ? 'completed' : 'pending',
+          createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
+        } satisfies ManualTodo,
+      ];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeManualTodos(storageKey: string | undefined, todos: ManualTodo[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = manualKey(storageKey);
+    if (todos.length) window.localStorage.setItem(key, JSON.stringify(todos));
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Private browsing can reject storage; in-memory todos still work.
+  }
+}
+
 export function TodoBar({
   todos,
   onToast,
+  storageKey,
 }: {
   todos: TodoItem[];
   onToast?: (message: string) => void;
+  storageKey?: string;
 }) {
   const [visible, setVisible] = useState(true);
   const [open, setOpen] = useState(false);
+  const [manualTodos, setManualTodos] = useState<ManualTodo[]>(() =>
+    readManualTodos(storageKey),
+  );
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const writtenKeyRef = useRef(storageKey);
 
   useEffect(() => {
-    if (todos.length > 0) setVisible(true);
-  }, [todos.length]);
+    setManualTodos(readManualTodos(storageKey));
+    setDraft('');
+    setOpen(false);
+  }, [storageKey]);
 
-  if (!todos.length || !visible) return null;
+  useEffect(() => {
+    if (writtenKeyRef.current !== storageKey) {
+      writtenKeyRef.current = storageKey;
+      return;
+    }
+    writeManualTodos(storageKey, manualTodos);
+  }, [manualTodos, storageKey]);
 
-  const completed = todos.filter((t) => t.status === 'completed').length;
-  const inProgress = todos.find((t) => t.status === 'in_progress');
-  const pending = todos.find((t) => t.status === 'pending');
-  const allDone = todos.length > 0 && completed === todos.length;
-  const ratio = todos.length > 0 ? completed / todos.length : 0;
+  const combined = useMemo<TodoItem[]>(
+    () => [
+      ...todos,
+      ...manualTodos.map((todo) => ({
+        id: todo.id,
+        content: todo.content,
+        status: todo.status,
+      })),
+    ],
+    [manualTodos, todos],
+  );
+
+  useEffect(() => {
+    if (combined.length > 0) setVisible(true);
+  }, [combined.length]);
+
+  const completed = combined.filter((todo) => todo.status === 'completed').length;
+  const inProgress = combined.find((todo) => todo.status === 'in_progress');
+  const pending = combined.find((todo) => todo.status === 'pending');
+  const allDone = combined.length > 0 && completed === combined.length;
+  const ratio = combined.length > 0 ? completed / combined.length : 0;
   const litCount = allDone ? 3 : ratio >= 0.66 ? 2 : 1;
   const title =
-    inProgress?.content ||
-    (allDone ? '모두 끝났어요' : pending?.content || '진행 중');
+    combined.length === 0
+      ? '할 일을 추가해 보세요'
+      : inProgress?.content ||
+        (allDone ? '모두 끝났어요' : pending?.content || '진행 중');
+
+  const focusAdd = () => {
+    setOpen(true);
+    window.setTimeout(() => inputRef.current?.focus(), 140);
+  };
+
+  if (!combined.length && !open) {
+    return (
+      <button
+        type="button"
+        className="todo-peek todo-launcher"
+        onClick={focusAdd}
+        aria-label="할 일 추가"
+      >
+        <span className="todo-bars" aria-hidden="true">
+          <i className="dim" />
+          <i className="dim" />
+          <i className="dim" />
+        </span>
+        <span className="todo-peek-title">할 일 추가</span>
+        <Plus size={14} />
+      </button>
+    );
+  }
+
+  const addManualTodo = () => {
+    const content = draft.replace(/\s+/g, ' ').trim();
+    if (!content) return;
+    const next: ManualTodo = {
+      id: `manual-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      content: content.slice(0, 360),
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+    setManualTodos((current) => [...current, next]);
+    setDraft('');
+    setOpen(true);
+    onToast?.('할 일을 추가했어요');
+    window.setTimeout(() => inputRef.current?.focus(), 60);
+  };
+
+  const toggleManualTodo = (id: string) => {
+    setManualTodos((current) =>
+      current.map((todo) =>
+        todo.id === id
+          ? { ...todo, status: todo.status === 'completed' ? 'pending' : 'completed' }
+          : todo,
+      ),
+    );
+  };
+
+  const removeManualTodo = (id: string) => {
+    setManualTodos((current) => current.filter((todo) => todo.id !== id));
+    onToast?.('할 일을 지웠어요');
+  };
+
+  const summaryBars = (
+    <span className="todo-bars" aria-hidden="true">
+      {[0, 1, 2].map((idx) => (
+        <i
+          key={idx}
+          className={allDone ? 'done' : idx < litCount ? 'active' : 'dim'}
+        />
+      ))}
+    </span>
+  );
+
+  if (!visible) {
+    return (
+      <button
+        type="button"
+        className={`todo-peek ${allDone ? 'is-done' : 'is-active'}`}
+        onClick={() => setVisible(true)}
+        aria-label="할 일 카드 다시 열기"
+      >
+        {summaryBars}
+        <span className="todo-peek-title">{title}</span>
+        <span className="todo-count">
+          {completed} / {combined.length}
+        </span>
+        <ChevronUp size={14} className="chev" />
+      </button>
+    );
+  }
 
   return (
     <div className={`todo-card ${open ? 'expanded' : ''} ${allDone ? 'is-done' : 'is-active'}`}>
@@ -42,24 +212,20 @@ export function TodoBar({
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
         >
-          <span className="todo-bars" aria-hidden="true">
-            {[0, 1, 2].map((idx) => (
-              <i
-                key={idx}
-                className={
-                  allDone
-                    ? 'done'
-                    : idx < litCount
-                      ? 'active'
-                      : 'dim'
-                }
-              />
-            ))}
-          </span>
+          {summaryBars}
           <span className="todo-title">{title}</span>
           <span className="todo-count">
-            {completed} / {todos.length}
+            {completed} / {combined.length}
           </span>
+        </button>
+        <button
+          type="button"
+          className="todo-mini"
+          onClick={focusAdd}
+          aria-label="할 일 추가"
+          title="할 일 추가"
+        >
+          <Plus size={16} />
         </button>
         <button
           type="button"
@@ -74,6 +240,7 @@ export function TodoBar({
           className="todo-mini"
           onClick={() => {
             setVisible(false);
+            setOpen(false);
             onToast?.('할 일 카드를 숨겼어요');
           }}
           aria-label="할 일 카드 닫기"
@@ -81,6 +248,9 @@ export function TodoBar({
           <X size={16} />
         </button>
       </div>
+      <span className="todo-progress" aria-hidden="true">
+        <i style={{ width: `${Math.round(ratio * 100)}%` }} />
+      </span>
       <div className="todo-body">
         <div className="todo-body-inner">
           <ul>
@@ -98,7 +268,66 @@ export function TodoBar({
                 <span>{todo.content}</span>
               </li>
             ))}
+            {manualTodos.length > 0 && (
+              <li className="todo-section-label">
+                내 할 일
+                <span>{manualTodos.length}</span>
+              </li>
+            )}
+            {manualTodos.map((todo) => (
+              <li key={todo.id} className={`todo-item manual status-${todo.status}`}>
+                <button
+                  type="button"
+                  className={`todo-check status-${todo.status}`}
+                  onClick={() => toggleManualTodo(todo.id)}
+                  aria-label={
+                    todo.status === 'completed'
+                      ? `${todo.content} 완료 취소`
+                      : `${todo.content} 완료`
+                  }
+                >
+                  {todo.status === 'completed' ? (
+                    <Check size={11} strokeWidth={3} />
+                  ) : null}
+                </button>
+                <span>{todo.content}</span>
+                <button
+                  type="button"
+                  className="todo-remove"
+                  onClick={() => removeManualTodo(todo.id)}
+                  aria-label={`${todo.content} 삭제`}
+                  title="할 일 삭제"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </li>
+            ))}
           </ul>
+          <div className="todo-add-row">
+            <Plus size={13} />
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                event.stopPropagation();
+                addManualTodo();
+              }}
+              placeholder="할 일 추가 후 Enter"
+              maxLength={360}
+              aria-label="새 할 일"
+            />
+            <button
+              type="button"
+              className="todo-add-btn"
+              onClick={addManualTodo}
+              disabled={!draft.trim()}
+            >
+              추가
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -207,6 +436,65 @@ export function parseChecklistTodos(texts: string[], busy = false): TodoItem[] {
   return list;
 }
 
+type StructuredTodo = { content: string; status?: string };
+
+function todoStatus(value?: string): TodoItem['status'] {
+  const status = String(value || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (/complete|done|finish|success/.test(status)) return 'completed';
+  if (/progress|active|running|doing|working/.test(status)) return 'in_progress';
+  if (/cancel|skip|abort|drop/.test(status)) return 'cancelled';
+  return 'pending';
+}
+
+function structuredTodosFromTool(tool: RawToolLike): StructuredTodo[] | null {
+  const raw = String(tool.command || tool.detail || '').trim();
+  if (!raw.startsWith('{') && !raw.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const record = parsed as { todos?: unknown[]; items?: unknown[] };
+    const isTodoTool = /todo/i.test(String(tool.tool || tool.name || tool.label || ''));
+    const list = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(record.todos)
+        ? record.todos
+        : isTodoTool && Array.isArray(record.items)
+          ? record.items
+          : null;
+    if (!list) return null;
+    const todos = list.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const entry = item as Record<string, unknown>;
+      const content = [entry.content, entry.text, entry.title, entry.todo, entry.task].find(
+        (value): value is string => typeof value === 'string' && value.trim().length > 0,
+      );
+      if (!content) return [];
+      return [
+        {
+          content: content.trim().slice(0, 360),
+          status: typeof entry.status === 'string' ? entry.status : undefined,
+        },
+      ];
+    });
+    return todos.length ? todos : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the latest structured `write_todos` / `todowrite` payload. */
+export function parseStructuredTodos(tools: RawToolLike[]): TodoItem[] {
+  for (let index = tools.length - 1; index >= 0; index -= 1) {
+    const parsed = structuredTodosFromTool(tools[index]);
+    if (!parsed) continue;
+    return parsed.map((todo, todoIndex) => ({
+      id: `struct-${todoIndex}-${todo.content.slice(0, 24)}`,
+      content: todo.content,
+      status: todoStatus(todo.status),
+    }));
+  }
+  return [];
+}
+
 /**
  * Build a Todo checklist from the start of a task and advance stages one by
  * one (`pending` -> `in_progress` -> `completed`) as the agent works.
@@ -216,6 +504,15 @@ export function deriveTodosFromTools(
   texts: string[] = [],
   busy = false,
 ): TodoItem[] {
+  const structured = parseStructuredTodos(tools);
+  if (structured.length > 0) {
+    if (busy && !structured.some((item) => item.status === 'in_progress')) {
+      const firstPending = structured.find((item) => item.status === 'pending');
+      if (firstPending) firstPending.status = 'in_progress';
+    }
+    return structured;
+  }
+
   const checklist = parseChecklistTodos(texts, busy);
   if (checklist.length >= 1) {
     if (!busy) {

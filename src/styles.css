@@ -91,6 +91,8 @@ pre {
 /* ── shell ─────────────────────────────────────────────── */
 
 .stage {
+  position: relative;
+  isolation: isolate;
   height: 100dvh;
   display: flex;
   justify-content: center;
@@ -98,17 +100,191 @@ pre {
     radial-gradient(120% 65% at 50% -12%, #20150f 0%, #0d0b0b 42%, #080809 100%);
 }
 
+.ambient-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.9;
+  background:
+    radial-gradient(120% 80% at 50% -18%, rgba(242, 118, 58, 0.08), transparent 58%),
+    linear-gradient(180deg, rgba(13, 11, 10, 0) 58%, rgba(5, 5, 6, 0.22) 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
+}
+
+.ambient-wash {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+.ambient-wash-warm {
+  width: min(92vmax, 1280px);
+  aspect-ratio: 1;
+  left: -24%;
+  top: -34%;
+  background: radial-gradient(
+    circle,
+    rgba(242, 118, 58, 0.2) 0%,
+    rgba(242, 118, 58, 0.08) 36%,
+    transparent 68%
+  );
+  animation: ambient-drift-warm 34s ease-in-out infinite alternate;
+}
+
+.ambient-wash-violet {
+  width: min(78vmax, 1080px);
+  aspect-ratio: 1;
+  right: -28%;
+  top: 2%;
+  background: radial-gradient(
+    circle,
+    rgba(155, 123, 255, 0.16) 0%,
+    rgba(155, 123, 255, 0.055) 38%,
+    transparent 70%
+  );
+  animation: ambient-drift-violet 42s ease-in-out infinite alternate;
+}
+
+.ambient-wash-cyan {
+  width: min(64vmax, 900px);
+  aspect-ratio: 1;
+  left: -12%;
+  bottom: -38%;
+  background: radial-gradient(
+    circle,
+    rgba(111, 181, 214, 0.13) 0%,
+    rgba(111, 181, 214, 0.045) 40%,
+    transparent 70%
+  );
+  animation: ambient-drift-cyan 38s ease-in-out infinite alternate-reverse;
+}
+
+.ambient-horizon {
+  position: absolute;
+  left: 50%;
+  bottom: -24%;
+  width: 140%;
+  height: 62%;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse at 50% 55%,
+    rgba(111, 181, 214, 0.09) 0%,
+    rgba(111, 181, 214, 0.03) 34%,
+    transparent 68%
+  );
+}
+
+.ambient-motes {
+  position: absolute;
+  inset: 0;
+}
+
+.ambient-mote {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  background: rgba(255, 208, 175, 0.8);
+  box-shadow: 0 0 8px rgba(242, 118, 58, 0.55);
+  opacity: 0.24;
+  animation: ambient-twinkle 14s ease-in-out infinite;
+}
+
+.ambient-mote:nth-child(3n) {
+  background: rgba(170, 204, 255, 0.72);
+  box-shadow: 0 0 8px rgba(111, 181, 214, 0.5);
+}
+
+.ambient-mote:nth-child(3n + 2) {
+  background: rgba(193, 174, 255, 0.72);
+  box-shadow: 0 0 8px rgba(155, 123, 255, 0.48);
+}
+
+.ambient-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+.ambient-backdrop.is-desk {
+  opacity: 0.64;
+}
+
+.ambient-backdrop.is-login {
+  opacity: 0.9;
+}
+
+@keyframes ambient-drift-warm {
+  from {
+    transform: translate(-2%, -1%) scale(1);
+  }
+  to {
+    transform: translate(4%, 5%) scale(1.08);
+  }
+}
+
+@keyframes ambient-drift-violet {
+  from {
+    transform: translate(2%, -2%) scale(1.04);
+  }
+  to {
+    transform: translate(-5%, 4%) scale(0.96);
+  }
+}
+
+@keyframes ambient-drift-cyan {
+  from {
+    transform: translate(-2%, 2%) scale(0.98);
+  }
+  to {
+    transform: translate(5%, -4%) scale(1.06);
+  }
+}
+
+@keyframes ambient-twinkle {
+  0%,
+  100% {
+    opacity: 0.12;
+    transform: translate(0, 4px) scale(0.85);
+  }
+  50% {
+    opacity: 0.55;
+    transform: translate(3px, -8px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-wash,
+  .ambient-mote {
+    animation: none;
+  }
+}
+
 .phone {
   position: relative;
+  isolation: isolate;
   width: 100%;
   max-width: 560px;
   height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: linear-gradient(180deg, #0e0e0f 0%, #0b0b0c 34%, #0b0b0c 100%);
-  border-left: 1px solid #17171a;
-  border-right: 1px solid #17171a;
+  background:
+    radial-gradient(120% 70% at 50% -18%, rgba(242, 118, 58, 0.06), transparent 55%),
+    linear-gradient(
+      180deg,
+      rgba(14, 14, 15, 0.72) 0%,
+      rgba(10, 10, 12, 0.82) 38%,
+      rgba(9, 9, 11, 0.92) 100%
+    );
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 @media (min-width: 620px) {
@@ -128,9 +304,9 @@ pre {
   gap: 8px;
   padding: 13px 12px 11px 8px;
   border-bottom: 1px solid var(--border-soft);
-  background: rgba(13, 13, 14, 0.88);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(13, 13, 14, 0.7);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
 }
 
 .icon-btn {
@@ -663,14 +839,21 @@ pre {
   z-index: 20;
   flex: none;
   padding: 4px 12px calc(9px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, rgba(11, 11, 12, 0) 0%, rgba(11, 11, 12, 0.94) 16%, #0b0b0c 42%);
+  background: linear-gradient(
+    180deg,
+    rgba(11, 11, 12, 0) 0%,
+    rgba(11, 11, 12, 0.55) 18%,
+    rgba(11, 11, 12, 0.92) 52%,
+    #0b0b0c 100%
+  );
 }
 
 .todo-card {
   margin: 0 2px 8px;
-  border-radius: 13px;
+  border-radius: 14px;
   border: 1px solid #2d2d30;
   background: #1b1b1d;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
   overflow: hidden;
   transition: border-color 0.2s, background 0.2s;
 }
@@ -688,8 +871,31 @@ pre {
 .todo-head {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding: 3px 4px 3px 12px;
+  min-height: 40px;
+  padding: 2px 4px 2px 11px;
+}
+
+.todo-progress {
+  display: block;
+  height: 3px;
+  margin: 0 11px 1px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #2a2722;
+}
+
+.todo-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f5b841, #f2763a);
+  box-shadow: 0 0 8px rgba(245, 184, 65, 0.4);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.todo-card.is-done .todo-progress i {
+  background: linear-gradient(90deg, #47d486, #7ce0b0);
+  box-shadow: 0 0 8px rgba(71, 212, 134, 0.35);
 }
 
 .todo-summary {
@@ -734,8 +940,10 @@ pre {
 .todo-title {
   flex: 1;
   min-width: 0;
-  font-size: 13.5px;
-  font-weight: 550;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.1px;
   color: #e6e3df;
   white-space: nowrap;
   overflow: hidden;
@@ -757,7 +965,7 @@ pre {
   padding-left: 6px;
   padding-right: 2px;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 10.5px;
   color: #8b888e;
 }
 
@@ -794,23 +1002,25 @@ pre {
 .todo-body ul {
   list-style: none;
   margin: 0;
-  padding: 2px 14px 12px;
+  padding: 1px 13px 11px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
 .todo-body li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
+  gap: 7px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  letter-spacing: -0.08px;
   color: #aaa6a2;
 }
 
 .todo-check {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   flex: none;
   display: grid;
   place-items: center;
@@ -844,9 +1054,11 @@ pre {
   gap: 7px;
   padding: 7px 7px 7px 12px;
   border-radius: 22px;
-  border: 1px solid #2e2e32;
-  background: #1a1a1c;
-  transition: border-color 0.18s, box-shadow 0.18s;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(26, 26, 28, 0.82);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
 }
 
 .composer:focus-within {
@@ -3047,8 +3259,10 @@ button:disabled {
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid #26262a;
-  background: #131315;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(19, 19, 21, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   font-size: 12.5px;
   color: #c9c6c1;
   text-align: left;
@@ -4205,7 +4419,7 @@ button:disabled {
   padding: 32px 26px calc(32px + env(safe-area-inset-bottom));
   background:
     radial-gradient(90% 55% at 50% 0%, rgba(242, 118, 58, 0.09), transparent 62%),
-    linear-gradient(180deg, #0e0e0f, #0b0b0c);
+    linear-gradient(180deg, rgba(14, 14, 15, 0.72), rgba(11, 11, 12, 0.86));
 }
 
 .login-mark {
@@ -4996,4 +5210,375 @@ summary:focus-visible {
 .codex-msg {
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
+}
+
+/* ── ambient 3D depth ───────────────────────────────────── */
+
+.ambient-depth {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  translate: var(--ambient-x, 0px) var(--ambient-y, 0px);
+  transition: translate 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: translate;
+}
+
+.ambient-depth::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  width: min(76vmax, 1080px);
+  height: 30%;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    rgba(242, 118, 58, 0.075) 0%,
+    rgba(155, 123, 255, 0.035) 38%,
+    transparent 72%
+  );
+  filter: blur(10px);
+}
+
+.ambient-grid {
+  position: absolute;
+  left: -38%;
+  right: -38%;
+  bottom: -30%;
+  height: 86%;
+  display: block;
+  opacity: 0.17;
+  transform: perspective(760px) rotateX(64deg);
+  transform-origin: center bottom;
+  background-image:
+    linear-gradient(rgba(255, 166, 105, 0.32) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 166, 105, 0.26) 1px, transparent 1px);
+  background-size: 70px 70px;
+  background-position: center bottom;
+  mask-image: linear-gradient(180deg, transparent 0%, #000 28%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 28%, #000 78%, transparent 100%);
+  animation: ambientGridFlow 26s linear infinite;
+}
+
+.ambient-orbit {
+  position: absolute;
+  display: block;
+  border: 1px solid rgba(255, 168, 108, 0.18);
+  border-radius: 50%;
+  box-shadow:
+    0 0 18px rgba(242, 118, 58, 0.045),
+    inset 0 0 24px rgba(155, 123, 255, 0.035);
+  transform-style: preserve-3d;
+  opacity: 0.72;
+}
+
+.ambient-orbit-a {
+  width: min(62vmax, 900px);
+  height: min(26vmax, 380px);
+  right: -13%;
+  top: 15%;
+  rotate: -16deg;
+  animation: ambientOrbitFloat 17s ease-in-out infinite alternate;
+}
+
+.ambient-orbit-b {
+  width: min(42vmax, 620px);
+  height: min(17vmax, 250px);
+  left: -7%;
+  bottom: 18%;
+  border-color: rgba(155, 123, 255, 0.2);
+  rotate: 23deg;
+  animation: ambientOrbitFloat 21s ease-in-out -6s infinite alternate-reverse;
+}
+
+.ambient-backdrop.is-desk .ambient-grid {
+  opacity: 0.22;
+}
+
+.ambient-backdrop.is-desk .ambient-orbit {
+  opacity: 0.54;
+}
+
+@keyframes ambientGridFlow {
+  from {
+    background-position: center 0;
+  }
+  to {
+    background-position: center 560px;
+  }
+}
+
+@keyframes ambientOrbitFloat {
+  from {
+    translate: 0 -7px;
+    opacity: 0.42;
+  }
+  to {
+    translate: 0 11px;
+    opacity: 0.78;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-depth {
+    translate: none;
+    transition: none;
+  }
+
+  .ambient-grid,
+  .ambient-orbit {
+    animation: none;
+  }
+}
+
+/* ── manual todos ───────────────────────────────────────── */
+
+.todo-card {
+  position: relative;
+  transform-style: preserve-3d;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.32),
+    inset 0 1px rgba(255, 255, 255, 0.035);
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.todo-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 20px 42px rgba(0, 0, 0, 0.36),
+    inset 0 1px rgba(255, 255, 255, 0.045);
+}
+
+.todo-body li.todo-section-label {
+  margin-top: 3px;
+  padding-top: 8px;
+  border-top: 1px dashed #2c292d;
+  color: #837b74;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.todo-section-label span {
+  margin-left: auto;
+  color: #5f5a56;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.todo-item.manual .todo-check {
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.todo-item.manual .todo-check:hover {
+  transform: scale(1.08);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.todo-item.manual .todo-check.status-completed:hover {
+  background: rgba(71, 212, 134, 0.22);
+}
+
+.todo-remove {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  border-radius: 5px;
+  color: #655f66;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.todo-item.manual:hover .todo-remove,
+.todo-remove:focus-visible {
+  opacity: 1;
+}
+
+.todo-remove:hover {
+  color: #ef9b8c;
+  background: #2a1715;
+}
+
+.todo-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 14px 11px;
+  padding: 5px 7px;
+  border: 1px solid #2d2a2e;
+  border-radius: 8px;
+  color: #6e6770;
+  background: #151416;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.todo-add-row:focus-within {
+  border-color: #55412e;
+  box-shadow: 0 0 0 3px rgba(242, 118, 58, 0.055);
+}
+
+.todo-add-row input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 3px 0;
+  color: #d8d3ce;
+  background: transparent;
+  font-size: 11.5px;
+}
+
+.todo-add-row input::placeholder {
+  color: #6f696b;
+}
+
+.todo-add-btn {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #4a382b;
+  border-radius: 6px;
+  color: #e9bb92;
+  background: #211a15;
+  font-size: 10px;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.todo-add-btn:hover:not(:disabled) {
+  border-color: #6b4a34;
+  color: #ffe1c4;
+  background: #2a1d15;
+}
+
+.todo-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.todo-peek {
+  width: calc(100% - 4px);
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 8px;
+  padding: 7px 10px;
+  border: 1px solid #2d2a2d;
+  border-radius: 10px;
+  color: #aba5a0;
+  background: linear-gradient(180deg, #1b1a1c, #171618);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  text-align: left;
+  transition: border-color 0.16s ease, transform 0.16s ease;
+}
+
+.todo-peek:hover {
+  border-color: #4a3b2e;
+  transform: translateY(-1px);
+}
+
+.todo-peek-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #d8d2cc;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-peek .chev {
+  flex: none;
+  color: #7e7670;
+  transform: rotate(180deg);
+}
+
+.todo-peek.is-active {
+  border-color: rgba(245, 184, 65, 0.28);
+}
+
+.todo-peek.is-done {
+  border-color: rgba(71, 212, 134, 0.28);
+}
+
+.todo-launcher {
+  min-height: 30px;
+  border-style: dashed;
+  border-color: #2b292b;
+  background: rgba(19, 18, 20, 0.62);
+  box-shadow: none;
+  color: #7c7670;
+}
+
+.todo-launcher .todo-peek-title {
+  color: #8e8780;
+  font-size: 10.5px;
+}
+
+.todo-launcher .todo-bars i {
+  height: 10px;
+}
+
+.todo-launcher:hover {
+  border-color: #4a3b2e;
+  color: #d8b58c;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-card,
+  .todo-peek,
+  .todo-item.manual .todo-check,
+  .todo-remove {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ── liquid glass todo surfaces ────────────────────────── */
+
+.todo-card {
+  border-color: rgba(255, 255, 255, 0.09);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.006)),
+    rgba(22, 21, 24, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 12px 32px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+}
+
+.todo-card.is-active {
+  border-color: rgba(245, 184, 65, 0.32);
+  background:
+    linear-gradient(180deg, rgba(245, 184, 65, 0.12), rgba(245, 184, 65, 0.025)),
+    rgba(22, 21, 24, 0.68);
+}
+
+.todo-card.is-done {
+  border-color: rgba(71, 212, 134, 0.32);
+  background:
+    linear-gradient(180deg, rgba(71, 212, 134, 0.1), rgba(71, 212, 134, 0.02)),
+    rgba(20, 23, 21, 0.68);
+}
+
+.todo-peek {
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.006)),
+    rgba(19, 18, 20, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px) saturate(1.25);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25);
 }
