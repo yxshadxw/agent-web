@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Plus, RefreshCw, X } from 'lucide-react';
 import anime from 'animejs';
 import type { AgentProvider, AgentSession, AgyQuota, Tokens } from '../lib/api';
 import type { AgentEngine } from '../lib/engine';
@@ -21,6 +21,8 @@ type ModelProps = {
   groups?: UnifiedModelGroup[];
   onPick: (providerID: string, modelID: string, targetEngine?: AgentEngine) => void;
   onAdd?: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 };
 
 export function ModelList({
@@ -31,6 +33,8 @@ export function ModelList({
   groups,
   onPick,
   onAdd,
+  onRefresh,
+  refreshing,
 }: ModelProps) {
   const rows = providers.flatMap((provider) =>
     Object.values(provider.models).map((model) => ({ provider, model })),
@@ -39,6 +43,21 @@ export function ModelList({
   if (groups && groups.length > 0) {
     return (
       <div className="sheet-content model-sheet">
+        {onRefresh && (
+          <div className="model-sheet-bar">
+            <span className="model-sheet-kicker">사용 가능한 모델</span>
+            <button
+              type="button"
+              className="model-refresh-btn"
+              onClick={onRefresh}
+              disabled={refreshing}
+              aria-label="모델 목록 새로고침"
+            >
+              <RefreshCw size={13} className={refreshing ? 'spin' : ''} />
+              <span>{refreshing ? '불러오는 중…' : '모델 새로고침'}</span>
+            </button>
+          </div>
+        )}
         {groups.map((group) => (
           <div key={group.id} className="model-group">
             <div className="sheet-head">

@@ -1,0 +1,234 @@
+{
+  "id": "529d26a8-fcc3-47ba-8d86-c7c2324f6b3c",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "term_7f149d2d-4a71-4b28-acde-06b15f89a0aa",
+      "status": "running",
+      "tail": [
+        " ███████████                        ██                 ▄████  ▄██",
+        " ███▀▀▀▀▀▀▀▀                        ██                 ██    ██▀",
+        " ███ █████  ██████ ▄█████   ▄████▄  ██████▄  ██   ██ ████████████",
+        " ███ ███▀▀  ██▀   ███▄▄▄██ ██▄▄▄███ ██   ▀██ ██   ██   ██    ██",
+        " ███ ███    ███   ███▀▀▀▀▀ ██▀▀▀▀▀  ██▄  ▄██ ██▄  ██   ██    ██",
+        " ███ ██▀    ██▀    ▀█████   ▀████▀  ██████▀   ▀████▀   ██    ██",
+        " ┌──────────────────────────────────────────────────────────────────┐",
+        " │ May use data for AI training                                     │",
+        " │ Your first message starts the session.                           │",
+        " │ 7/53 hours remaining                                             │",
+        " │ Starter plan                                                     │",
+        " │ 13 day streak                                                    │",
+        " │ 🎁 Streak perk: +3 hours every day                               │",
+        " │                                                                  │",
+        " │ ✦ Refer friends → earn hours:                                    │",
+        " │                                                                  │",
+        " │ ⎘ Copy invite link  Learn More ↵                                 │",
+        " └──────────────────────────────────────────────────────────────────┘",
+        "                                                                           ───────────────────────────────────────────╮",
+        "                                                                                                        Ad [Report 1] │",
+        "                                                                           nLLM's developer-focused gateway.          │",
+        "                                                                                                                      │",
+        "                                                                           ───────────────────────────────────────────╯",
+        "                                                                           ────────────────────────────────────────────╮",
+        "                                                                                                                       │",
+        "                                                                                                                       │",
+        "                                                                                                                       │",
+        "                                                                           ────────────────────────────────────────────╯",
+        "                                                                           n · /model to change · Chat: New chat",
+        " ╭───────────────────────────────────────────────────────────────────────╮",
+        " │ Run coding agents on your existing AI subscripti…       Ad [Report 1] │",
+        " │ Run coding agents and clients on your existing AI subscriptions …     │",
+        " │  Get Started  openllm.sh                                              │",
+        " ╰───────────────────────────────────────────────────────────────────────╯",
+        "╭─────────────────────────────────────────────────────────────────────────╮",
+        "│                                                                         │",
+        "│  Enter a coding task or / for commands                                  │",
+        "│                                                                         │",
+        "╰─────────────────────────────────────────────────────────────────────────╯",
+        " DeepSeek V4.1 Flash Fast • max · ~/orca/workspaces/ferrite-mc/",
+        " orchestration · /model to change · Chat: New chat",
+        " ← for history · ? for help"
+      ],
+      "truncated": true,
+      "limited": false,
+      "oldestCursor": "0",
+      "nextCursor": "1",
+      "latestCursor": "1",
+      "returnedLineCount": 42,
+      "tailRows": [
+        {
+          "wrapped": false,
+          "trailingSpaces": 55
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 56
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 55
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 57
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 57
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 57
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 8
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 46
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 12
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 25
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 48
+        }
+      ],
+      "source": "screen"
+    }
+  },
+  "_meta": {
+    "runtimeId": "a13bd33b-809c-4276-a2e0-e3c8b67735d9"
+  }
+}

@@ -1,0 +1,9 @@
+Agent Desk
+==========
+
+Portions of the streaming word reveal (`src/lib/streamFx.ts`), the streaming
+markdown renderer and syntax highlighting (`src/lib/markdown.ts`), the
+streaming effect keyframes, the markdown code-copy interaction, the BatonLine
+handoff divider, and the compact background-run chips are adapted from pi-oven,
+Copyright snowman6-git, licensed under the Apache License 2.0:
+https://github.com/snowman6-git/pi-oven

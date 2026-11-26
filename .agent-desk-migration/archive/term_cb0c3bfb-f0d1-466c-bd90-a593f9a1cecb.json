@@ -1,0 +1,239 @@
+{
+  "id": "e343c744-b3c6-4693-a3ed-9e7f746e35c5",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "term_cb0c3bfb-f0d1-466c-bd90-a593f9a1cecb",
+      "status": "running",
+      "tail": [
+        "  anger, Witch raider healing, bee hive/pollination, turtle egg/",
+        "  beach, golem construction, goat horn, fox trust, rabbit crop",
+        "  raid, mooshroom variant, frog의 Slime/MagmaCube prey",
+        "  - AI/내비게이션 잔여: 탐색 예산 소진 시 partial path 없음,",
+        "  cross-tick chunk cache 없음, 거미 대각선/천장 이동, 3D water",
+        "  navigation, border door ownership",
+        "  - 드래곤 잔여: inertia/turn-rate kinematics,  part_boxes",
+        "  근사, 비바닐라 지형의 guarded-spike 선택",
+        "  - 사파링 성장:  006df3aa  완료 브랜치가 있지만 이번 6개 워커",
+        "  범위 밖이라  main 에 병합하지 않았습니다",
+        "  - 릴리스: Windows GUI/ZIP/NSIS 확인, 구버전 protocol",
+        "  translation,  /test  structure runner",
+        "  - 보안: Dependabot  glib 0.18.5  moderate alert 10은 Tauri/",
+        "  GTK lock 때문에 보류",
+        "  성능 개선 작업",
+        "  성능 워커는 아직  working 이고 변경분이 미커밋 상태라  main",
+        "  에 넣지 않았습니다. 산출물은  holders_e2e  벤치마크와 holder",
+        "  batching 토글이며, 측정 결과는 throughput 1.00x(batched 5,080",
+        "  vs unbatched 5,093 changes/s), signal 처리 시간 8.95x 감소(52.",
+        "  6 ms vs 471.1 ms)입니다. 처리량 개선이 증명되지 않아 병합하지",
+        "  않았습니다.",
+        "  최근 800-bot 측정의 주 병목은  region-tick/track-entities 와",
+        "  global-tick/entity-tracking 입니다. Superflat은 평균 66–80 ms,",
+        "   p99 126–147 ms였고, fixture는 평균 8.9–10.9 ms, p99 28–37 ms",
+        "  였습니다. 다음 단계는 성능 워커의 하네스를 커밋하고, 이번",
+        "  gameplay 병합 후 800-bot을 다시 측정해 entity tracking 개선을",
+        "  검증하는 것입니다.",
+        "                                               ⎘ • 26m 24s • △▽   ▄",
+        " ╭───────────────────────────────────────────────────────────────╮",
+        " │ Run coding agents on your existing AI su…       Ad [Report 2] │",
+        " │ Manage multiple AI models and run coding agents through …     │",
+        " │  Start Building  openllm.sh                                   │",
+        " ╰───────────────────────────────────────────────────────────────╯",
+        "╭─────────────────────────────────────────────────────────────────╮",
+        "│                                                                 │",
+        "│  Enter a coding task or / for commands                          │",
+        "│                                                                 │",
+        "╰─────────────────────────────────────────────────────────────────╯",
+        " DeepSeek V4.1 Flash Fast • max · ~/orca/workspaces/ferrite-mc/",
+        " orchestration · /model to change · Chat: 전에 하던 작업 모두",
+        " 완료됬는데 커밋해줘. plugin-b-worlded? entity, items. 하고 이제",
+        " 안쓰는 워크트리들조 ㅁ정리해봐 정신없",
+        " ← for history · ? for help"
+      ],
+      "truncated": true,
+      "limited": false,
+      "oldestCursor": "0",
+      "nextCursor": "1",
+      "latestCursor": "1",
+      "returnedLineCount": 43,
+      "tailRows": [
+        {
+          "wrapped": false,
+          "trailingSpaces": 3
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 5
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 13
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 7
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 5
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 32
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 9
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 25
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 5
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 25
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 13
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 28
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 6
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 45
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 51
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 6
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 5
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 4
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 3
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 4
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 54
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 5
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 3
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 4
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 8
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 4
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 47
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 4
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 6
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 3
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 29
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 40
+        }
+      ],
+      "source": "screen"
+    }
+  },
+  "_meta": {
+    "runtimeId": "a13bd33b-809c-4276-a2e0-e3c8b67735d9"
+  }
+}

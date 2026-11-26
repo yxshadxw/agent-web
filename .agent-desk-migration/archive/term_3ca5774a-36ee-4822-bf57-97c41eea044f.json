@@ -1,0 +1,284 @@
+{
+  "id": "7341cfe8-b562-44ba-8098-ae07448319b2",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "term_3ca5774a-36ee-4822-bf57-97c41eea044f",
+      "status": "running",
+      "tail": [
+        "  - 현재 데스크 목록",
+        "  -  agent-web : 워크트리 5개",
+        "  -  ferrite-mc : 워크트리 1개",
+        "  - 총 워크트리 6개",
+        "  - 경로가 살아 있는 기존 Orca 터미널 6개를 legacy 어댑터로 연결",
+        "  - Ferrite 셸 2개",
+        "  - agent-web/main 셸 1개",
+        "  - agent-web Freebuff 터미널 3개",
+        "  -  /overview 에 에이전트로 표시되고  /terminal 로 화면 읽기·입력 전송 가능",
+        "  - 기존 프로세스는 죽이지 않았습니다. 새 터미널은 계속 Rust PTY로 생성됩니다.",
+        "  - 라이브 서비스 재시작 완료",
+        "  -  agent-desk.service  active",
+        "  -  4099  Rust 서버,  5173  Vite",
+        "  - OpenCode  4097 , Agy  4098  유지",
+        "  - 기존 Orca 브리지 프로세스 없음",
+        "  검증",
+        "  -  cargo build --manifest-path server/Cargo.toml  통과",
+        "  -  node --check scripts/serve.mjs  통과",
+        "  - 테스트 서버  /overview : 프로젝트 2개, 워크트리 6개, 터미널 6개 확인",
+        "  - 테스트 서버  /terminal : Ferrite 셸의 실제 프롬프트 출력 확인",
+        "  - 라이브 Vite 프록시  /orca-api/overview : 워크트리 6개, 에이전트 6개 확인",
+        "  - 라이브 페이지  200 ,  git diff --check  통과",
+        "  남은 제약",
+        "  - Orca에 남아 있던 터미널 21개 중 15개는 워크트리 디렉터리가 이미 삭제되어",
+        "  넘기지 못했습니다. 현재 경로가 존재하는 6개만 가져왔습니다.",
+        "  - 기존 6개 터미널은 프로세스를 보존하기 위해 Orca CLI를 읽기/쓰기 어댑터로",
+        "  사용합니다. 따라서 기존 터미널을 완전히 Orca 없이 쓰려면 해당 세션을 종료하고",
+        "  Rust PTY로 다시 시작해야 합니다.",
+        "  - 커밋·푸시는 하지 않았습니다.",
+        "                                                                                      ─────────────────────────────────╮",
+        "  변경 파일                                                                                                            │",
+        "                                                                                                                       │",
+        "  -  server/src/legacy.rs  신규                                                                                        │",
+        "  -  server/src/state.rs ,  main.rs ,  worktrees.rs ,  api.rs                         ─────────────────────────────────╯",
+        "  -  scripts/serve.mjs                                                                l to change · Chat: New chat",
+        "  -  server/NOTICE",
+        "  - 기존 애니메이션 변경분( streamFx , Markdown 복사, Todo/Wait/Tool)은 그대로 유지",
+        "                                                                   ⎘ • 9m 40s • △▽   █",
+        " ╭──────────────────────────────────────────────────────────────────────────────────╮",
+        " │ Run coding agents on your existing AI subscriptions                Ad [Report 1] │",
+        " │ Streamline your development workflow by running coding agents and clients t…     │",
+        " │  Get Started  openllm.sh                                                         │",
+        " ╰──────────────────────────────────────────────────────────────────────────────────╯",
+        " 22m left · 297.8K (28%)                                               ✕ End session",
+        "╭────────────────────────────────────────────────────────────────────────────────────╮",
+        "│                                                                                    │",
+        "│  Enter a coding task or / for commands                                             │",
+        "│                                                                                    │",
+        "╰────────────────────────────────────────────────────────────────────────────────────╯",
+        " DeepSeek V4.1 Flash Fast • max · ~/orca/workspaces/agent-web/parallel-acdhp-1 · /",
+        " model to change · Chat: Error │ │ Your session ended before this request ...",
+        " ← for history · ? for help"
+      ],
+      "truncated": true,
+      "limited": false,
+      "oldestCursor": "0",
+      "nextCursor": "1",
+      "latestCursor": "1",
+      "returnedLineCount": 52,
+      "tailRows": [
+        {
+          "wrapped": false,
+          "trailingSpaces": 100
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 91
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 90
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 101
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 56
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 102
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 95
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 87
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 44
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 42
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 91
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 89
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 87
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 84
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 86
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 114
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 64
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 79
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 48
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 55
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 44
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 72
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 109
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 44
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 59
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 44
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 41
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 86
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 88
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": true,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 6
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 102
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 3
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 1
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 2
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 0
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 4
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 9
+        },
+        {
+          "wrapped": false,
+          "trailingSpaces": 59
+        }
+      ],
+      "source": "screen"
+    }
+  },
+  "_meta": {
+    "runtimeId": "a13bd33b-809c-4276-a2e0-e3c8b67735d9"
+  }
+}

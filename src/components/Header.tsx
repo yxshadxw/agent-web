@@ -9,10 +9,12 @@ import {
   GitCompareArrows,
   Info,
   Menu,
+  Minimize2,
   MoreHorizontal,
   Pin,
   Plus,
   Settings,
+  Smartphone,
   Trash2,
   Type,
   Copy,
@@ -36,10 +38,13 @@ type Props = {
   onSettings: () => void;
   onOpenDesk: () => void;
   onOpenCodex: () => void;
+  onOpenAndroid?: () => void;
   engineOverride?: AgentEngine;
   onRename: () => void;
   onDelete: () => void;
   onCopyId: () => void;
+  onCompact?: () => void;
+  compacting?: boolean;
 };
 
 export function Header({
@@ -55,10 +60,13 @@ export function Header({
   onSettings,
   onOpenDesk,
   onOpenCodex,
+  onOpenAndroid,
   engineOverride,
   onRename,
   onDelete,
   onCopyId,
+  onCompact,
+  compacting,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
@@ -106,6 +114,16 @@ export function Header({
     { label: 'Git', icon: <GitBranch size={16} />, tab: 'git' },
     { label: 'Pin', icon: <Pin size={16} />, tab: 'pin' },
     { label: '컨텍스트', icon: <Gauge size={16} />, panel: 'context', separated: true },
+    ...(onCompact
+      ? [
+          {
+            label: compacting ? '컴팩트 중…' : '컴팩트',
+            icon: <Minimize2 size={16} />,
+            action: onCompact,
+            disabled: !hasSession || compacting,
+          },
+        ]
+      : []),
     { label: '사용량 한도', icon: <Activity size={16} />, panel: 'usage' },
     {
       label: engine === 'codex' ? 'Agy로 돌아가기' : 'Codex',
@@ -114,6 +132,9 @@ export function Header({
       separated: true,
     },
     { label: '병렬 데스크', icon: <Boxes size={16} />, action: onOpenDesk },
+    ...(onOpenAndroid
+      ? [{ label: '안드로이드 (noVNC)', icon: <Smartphone size={16} />, action: onOpenAndroid }]
+      : []),
     { label: '설정', icon: <Settings size={16} />, action: onSettings },
     { label: '새 세션', icon: <Plus size={16} />, action: onNewSession },
     { label: '타이틀 변경', icon: <Type size={16} />, action: onRename, disabled: !hasSession },
@@ -152,6 +173,16 @@ export function Header({
         >
           <Bot size={19} />
         </button>
+        {onOpenAndroid && (
+          <button
+            className="icon-btn"
+            onClick={onOpenAndroid}
+            aria-label="안드로이드 noVNC 열기"
+            title="안드로이드 (noVNC)"
+          >
+            <Smartphone size={18} />
+          </button>
+        )}
         <button
           className="icon-btn"
           onClick={onOpenDesk}

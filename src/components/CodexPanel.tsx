@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import {
   AlertTriangle,
   ArrowUp,
@@ -24,7 +22,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { cleanUserMessage, formatTokens, highlightQuotaWarningsHtml } from '../data';
+import { cleanUserMessage, formatTokens } from '../data';
 import type { AgentProvider } from '../lib/api';
 import { switchEngine, type AgentEngine } from '../lib/engine';
 import { useAgyQuota } from '../hooks/useQuota';
@@ -34,6 +32,10 @@ import { QuotaSection } from './Quota';
 import { TodoBar, deriveTodosFromTools } from './TodoBar';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import { SelectMenu } from './SelectMenu';
+import { handleMarkdownClick } from '../lib/markdown';
+import { useStreamMarkdown } from '../lib/streamFx';
+import { smoothScrollToBottom } from '../lib/smoothScroll';
+import { RevealText } from './StreamText';
 
 type CodexTool = {
   id?: string;
@@ -117,19 +119,18 @@ const CODEX_EFFORTS = [
 function CodexMarkdown({
   text,
   className = 'codex-md',
+  streaming = false,
 }: {
   text: string;
   className?: string;
+  streaming?: boolean;
 }) {
-  const html = useMemo(() => {
-    const parsed = marked.parse(text, { gfm: true, breaks: true }) as string;
-    return highlightQuotaWarningsHtml(
-      DOMPurify.sanitize(parsed, { FORBID_TAGS: ['style', 'form', 'input'] }),
-    );
-  }, [text]);
+  const html = useStreamMarkdown(text, streaming);
   return (
     <div
-      className={className}
+      className={`${className} md`}
+      data-fx="bounce"
+      onClick={handleMarkdownClick}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -182,7 +183,7 @@ function CodexThinking({ text, busy = false }: { text: string; busy?: boolean })
       </button>
       {open && (
         <div className="thinking-body reasoning-body">
-          <CodexMarkdown text={text} className="md" />
+          <RevealText text={text} active={busy} />
         </div>
       )}
     </div>
@@ -563,7 +564,7 @@ export function CodexPanel({
 
   useEffect(() => {
     const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) smoothScrollToBottom(el);
   }, [messages, busy, error]);
 
   const copyMessage = async (message: CodexMessage) => {
@@ -914,7 +915,7 @@ export function CodexPanel({
               {(liveTurn?.reasoning || !liveTurn?.text) && (
                 <CodexThinking
                   text={liveTurn?.reasoning || '작업 중…'}
-                  busy={!liveTurn?.text}
+                  busy={busy}
                 />
               )}
               {liveTurn && liveTurn.tools.length > 0 && (
@@ -929,7 +930,7 @@ export function CodexPanel({
               )}
               {liveTurn?.text && (
                 <div className="assistant-text">
-                  <CodexMarkdown text={liveTurn.text} className="md" />
+                  <CodexMarkdown text={liveTurn.text} className="md" streaming />
                 </div>
               )}
             </article>

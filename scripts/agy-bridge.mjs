@@ -425,6 +425,9 @@ const FALLBACK_MODELS = `gemini-4-neon-high\tGemini 4 Neon (High)
 gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)
 gemini-4-neon-medium\tGemini 4 Neon (Medium)
 gemini-4-neon-low\tGemini 4 Neon (Low)
+gemini-4-carbon-medium\tGemini 4 Carbon (Medium)
+gemini-4-carbon-high\tGemini 4 Carbon (High)
+gemini-4-carbon-low\tGemini 4 Carbon (Low)
 gemini-4-argon-medium\tGemini 4 Argon (Medium)
 gemini-4-argon-high\tGemini 4 Argon (High)
 gemini-4-argon-low\tGemini 4 Argon (Low)
@@ -433,7 +436,8 @@ gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)
 gemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)
 gemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)
 gemini-pro-orchestrator-neon\tOrchestrator (Neon)
-gemini-pro-orchestrator-g1-pro\tOrchestrator (Argon)
+gemini-pro-orchestrator\tOrchestrator (Carbon)
+gemini-pro-orchestrator-argon\tOrchestrator (Argon)
 gemini-3.8-flash-high\tGemini 3.8 Flash (High)
 gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)
 gemini-3.8-flash-low\tGemini 3.8 Flash (Low)
@@ -471,16 +475,20 @@ function runShort(command, args, timeout = 15000) {
   });
 }
 
-async function loadCatalog() {
+async function loadCatalog(forceRefresh = false) {
+  if (forceRefresh) catalogPromise = null;
   if (catalogPromise) return catalogPromise;
   catalogPromise = (async () => {
     let text = FALLBACK_MODELS;
     try {
       const { stdout } = await runShort(AGY_BIN, ['models'], 25000);
-      const lines = stdout
+      const parsedLines = stdout
         .split(/\r?\n/)
-        .filter((line) => /^[^\s]+\t/.test(line));
-      if (lines.length) text = lines.join('\n');
+        .map((line) => line.replace(/.*\r/, '').trim())
+        .map((line) => line.match(/^([^\s]+)(?:\t|\s{2,})(.+)$/))
+        .filter(Boolean)
+        .map((m) => `${m[1].trim()}\t${m[2].trim()}`);
+      if (parsedLines.length) text = parsedLines.join('\n');
     } catch (error) {
       log('model list fallback', error.message);
     }
@@ -1592,7 +1600,8 @@ async function handle(req, res) {
   }
 
   if (path === '/config/providers' && method === 'GET') {
-    await loadCatalog();
+    const forceRefresh = url.searchParams.get('refresh') === '1';
+    await loadCatalog(forceRefresh);
     return send(res, 200, providersPayload());
   }
   if (path === '/config') {

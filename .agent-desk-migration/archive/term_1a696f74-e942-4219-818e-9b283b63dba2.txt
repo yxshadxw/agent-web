@@ -1,0 +1,46 @@
+  → Fix tick starvation
+  → Client validation
+  • Thinking
+    ...Piglin tests: 15 entity filtered piglin (includes 3 existing
+    mob/ai tests), 6 server piglin. Performance forceload 2. Good.
+    The final answer can mention "Piglin 15 + server 6, performance
+    2". Fine. No push, main ahead 6. Good. Let's write in Korean
+    with bullets, concise but complete.
+  두 레인을 이어서 완료하고  main 에 병합했습니다. push는 하지
+  않았습니다.
+  Piglin bartering — 완료
+  - 커밋:  ef2166ce , merge  0deba172
+  - gold ingot 1개 소모, 119틱 admiration,  piglin_bartering  loot roll
+  및 투척
+  - baby/dead/NoAI/cooldown/creative 처리, off-hand 강제 드롭
+  - 8슬롯 inventory + NBT 저장/로드 + 사망 드롭
+  - region split/merge 상태 보존
+  - guarded chest anger 및 cross-region alert
+  - 검증:  ferrite-entity  Piglin 관련 15개,  ferrite-server  Piglin
+  관련 6개 통과
+  성능 — 완료, 단 처리량 개선은 아님
+  - 커밋:  a1ed2ffb ,  f65fa2f3 , merge  50fdae6e
+  - 20 TPS  /forceload  40사이클 × 2회 측정                                ───────────────────────────────────────────╮
+  - 5,078 vs 5,112 changes/s = 0.99x → 처리량 개선 없음                                                 Ad [Report 1] │
+  - holder signal time 50.9 vs 426.8 ms = 8.39x 감소                       nLLM's developer-focused gateway.          │
+  - 기존 main도 이미  HoldBatch 를 사용하고 있어 기본 동작은 바뀌지                                                   │
+  않았습니다. 토글은 A/B 측정·회귀 테스트용입니다.                         ───────────────────────────────────────────╯
+  - 결과와 한계:  docs/perf/2026-11-19/holder-batching.md , raw:           ────────────────────────────────────────────╮
+  holders-e2e.txt                                                                                                      │
+  - 800-bot 재측정은 하지 않았습니다.                                                                                  │
+  -  HOLDERS_STREAM=1 ,  HOLDERS_UNPACED=1 은 실험적 opt-in으로                                                        │
+  돌렸습니다.                                                              ────────────────────────────────────────────╯
+                                                                           n · /model to change · Chat: New chat
+  검증
+                                                                          ▀
+                                     ↓
+╭─────────────────────────────────────────────────────────────────────────╮
+│                                                                         │
+│  Enter a coding task or / for commands                                  │
+│                                                                         │
+╰─────────────────────────────────────────────────────────────────────────╯
+ DeepSeek V4.1 Flash Fast • max · ~/orca/workspaces/ferrite-mc/
+ orchestration · /model to change · Chat: 전에 하던 작업 모두 완료됬는데
+ 커밋해줘. plugin-b-worlded? entity, items. 하고 이제 안쓰는 워크트리들조
+ ㅁ정리해봐 정신없
+ ← for history · ? for help

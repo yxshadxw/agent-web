@@ -323,8 +323,9 @@ export type LaunchResult = {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = init?.signal ? null : new AbortController();
+  const timeoutMs = path.startsWith('/overview') ? 45_000 : 35_000;
   const timer = controller
-    ? window.setTimeout(() => controller.abort(new Error('Orca 응답 시간이 초과되었습니다.')), 12_000)
+    ? window.setTimeout(() => controller.abort(new Error('Orca 응답 시간이 초과되었습니다.')), timeoutMs)
     : 0;
   try {
     const res = await fetch(`/orca-api${path}`, {
@@ -348,14 +349,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       throw new Error(message);
     }
     return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Orca 응답 시간이 초과되었습니다.');
+    }
+    throw err;
   } finally {
     if (timer) window.clearTimeout(timer);
   }
 }
 
 export const orcaApi = {
-  overview: (refresh = false) =>
-    request<OrcaOverview>(`/overview${refresh ? '?refresh=1' : ''}`),
+  overview: async (refresh = false) => {
+    try {
+      return await request<OrcaOverview>(`/overview${refresh ? '?refresh=1' : ''}`);
+    } catch (err) {
+      if (refresh) {
+        return await request<OrcaOverview>('/overview');
+      }
+      throw err;
+    }
+  },
   usage: (refresh = false) =>
     request<FreebuffUsage>(`/usage${refresh ? '?refresh=1' : ''}`),
   terminal: (handle: string, options?: { screen?: boolean; limit?: number }) =>

@@ -1,6 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { memo, useEffect, useRef, useState } from 'react';
+import { handleMarkdownClick } from '../lib/markdown';
 import type {
   FilePart,
   Part,
@@ -36,14 +35,13 @@ import {
   cleanUserMessage,
   fmtDuration,
   formatTokens,
-  highlightQuotaWarningsHtml,
   timeLabel,
   type PinnedFile,
 } from '../data';
 import { BrandGlyph } from './Brand';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
-
-marked.setOptions({ gfm: true, breaks: true });
+import { FX_MS, useStreamMarkdown } from '../lib/streamFx';
+import { RevealText } from './StreamText';
 
 type Props = {
   messages: MessageWithParts[];
@@ -142,15 +140,7 @@ export const Timeline = memo(function Timeline({
         ),
       )}
 
-      {busy && !hasVisibleOutput && (
-        <div className="bubble-row agent bubble-in">
-          <span className="agent-dot" />
-          <div className="bubble agent typing">
-            <Loader2 size={14} className="spin" />
-            <span>작업 중…</span>
-          </div>
-        </div>
-      )}
+      {busy && !hasVisibleOutput && <BusyBubble />}
 
       {permissions.map((permission) => (
         <PermissionCard
@@ -173,7 +163,27 @@ export const Timeline = memo(function Timeline({
   );
 });
 
-function UserMessage({
+function BusyBubble() {
+  const [startedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  return (
+    <div className="bubble-row agent bubble-in">
+      <span className="agent-dot" />
+      <div className="bubble agent typing">
+        <Loader2 size={14} className="spin" />
+        <span>작업 중…</span>
+        {seconds >= 2 && <span className="typing-clock">{seconds}s</span>}
+      </div>
+    </div>
+  );
+}
+
+const UserMessage = memo(function UserMessage({
   message,
   onToast,
 }: {
@@ -217,7 +227,7 @@ function UserMessage({
       </div>
     </div>
   );
-}
+});
 
 function UserFile({ file }: { file: FilePart }) {
   const isImage = file.mime.startsWith('image/') && file.url.startsWith('data:');
@@ -236,7 +246,7 @@ function UserFile({ file }: { file: FilePart }) {
   );
 }
 
-function AssistantMessage({
+const AssistantMessage = memo(function AssistantMessage({
   message,
   busy,
   onToast,
@@ -361,7 +371,7 @@ function AssistantMessage({
       )}
     </div>
   );
-}
+});
 
 function ReasoningBlock({
   parts,
@@ -372,7 +382,7 @@ function ReasoningBlock({
   busy: boolean;
   defaultOpen: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen || busy);
+  const [open, setOpen] = useState(true);
 
   useEffect(() => {
     if (defaultOpen || busy) setOpen(true);
@@ -389,6 +399,7 @@ function ReasoningBlock({
 
   const end = openPart ? now : Math.max(...parts.map((part) => part.time.end || part.time.start));
   const seconds = Math.max(0, (end - start) / 1000);
+  const text = parts.map((part) => part.text).join('\n\n');
 
   return (
     <div className="thinking msg-anim">
@@ -407,9 +418,7 @@ function ReasoningBlock({
       </button>
       {open && (
         <div className="thinking-body reasoning-body">
-          {parts.map((part) => (
-            <p key={part.id}>{part.text}</p>
-          ))}
+          <RevealText text={text} active={busy} />
         </div>
       )}
     </div>
@@ -417,19 +426,28 @@ function ReasoningBlock({
 }
 
 function MarkdownText({ text, streaming }: { text: string; streaming: boolean }) {
-  const html = useMemo(() => {
-    const rendered = marked.parse(text) as string;
-    return highlightQuotaWarningsHtml(
-      DOMPurify.sanitize(rendered, {
-        ADD_ATTR: ['target'],
-        FORBID_TAGS: ['style', 'form', 'input'],
-      }),
-    );
-  }, [text]);
+  const prevLenRef = useRef(text.length);
+  const [animating, setAnimating] = useState(streaming);
+  useEffect(() => {
+    if (streaming || text.length > prevLenRef.current) {
+      setAnimating(true);
+    }
+    prevLenRef.current = text.length;
+    if (streaming) return;
+    const timer = window.setTimeout(() => setAnimating(false), FX_MS + 80);
+    return () => window.clearTimeout(timer);
+  }, [streaming, text]);
+
+  const revealed = useStreamMarkdown(text, streaming || animating);
 
   return (
     <div className="assistant-text">
-      <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
+      <div
+        className="md"
+        data-fx="ember"
+        onClick={handleMarkdownClick}
+        dangerouslySetInnerHTML={{ __html: revealed }}
+      />
       {streaming && <span className="stream-caret" aria-hidden="true" />}
     </div>
   );

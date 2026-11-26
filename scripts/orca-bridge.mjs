@@ -42,7 +42,7 @@ const MAX_BODY = 1_000_000;
 const MAX_ATTACHMENT_BODY = 30 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const ATTACHMENT_DIR = join(homedir(), '.orca', 'agent-web-attachments');
-const CACHE_MS = 2_500;
+const CACHE_MS = 8_000;
 const FREEBUFF_SESSION_MESSAGE_LIMIT = 80;
 const FREEBUFF_SESSION_ENTRY_LIMIT = 1_000;
 const FREEBUFF_SESSION_TEXT_MAX = 120_000;
@@ -533,17 +533,30 @@ async function buildOverview() {
 async function getOverview(force = false) {
   const now = Date.now();
   if (!force && overviewCache && now - overviewCacheAt < CACHE_MS) return overviewCache;
-  if (overviewInflight) return overviewInflight;
 
-  overviewInflight = buildOverview()
-    .then((overview) => {
-      overviewCache = overview;
-      overviewCacheAt = Date.now();
-      return overview;
-    })
-    .finally(() => {
-      overviewInflight = null;
-    });
+  if (!overviewInflight) {
+    overviewInflight = buildOverview()
+      .then((overview) => {
+        overviewCache = overview;
+        overviewCacheAt = Date.now();
+        return overview;
+      })
+      .finally(() => {
+        overviewInflight = null;
+      });
+  }
+
+  // Stale-while-revalidate: if we already have a cached overview, return it
+  // immediately while the background refresh completes so slow CLI calls
+  // never cause frontend request timeouts.
+  if (!force && overviewCache) return overviewCache;
+
+  if (force && overviewCache) {
+    return Promise.race([
+      overviewInflight,
+      new Promise((resolve) => setTimeout(() => resolve(overviewCache), 8_000)),
+    ]);
+  }
 
   return overviewInflight;
 }
@@ -722,7 +735,29 @@ function readWorktreeText(absPath, maxBytes = 32_768) {
   }
 }
 
+const worktreeDiffCache = new Map();
+const worktreeDiffInflight = new Map();
+
 async function worktreeFilesAndDiffs(worktree) {
+  const cwd = worktree.path;
+  const cached = worktreeDiffCache.get(cwd);
+  if (cached && Date.now() - cached.at < 2500) return cached.data;
+  const inflight = worktreeDiffInflight.get(cwd);
+  if (inflight) return inflight;
+
+  const task = computeWorktreeFilesAndDiffs(worktree)
+    .then((data) => {
+      worktreeDiffCache.set(cwd, { at: Date.now(), data });
+      return data;
+    })
+    .finally(() => {
+      worktreeDiffInflight.delete(cwd);
+    });
+  worktreeDiffInflight.set(cwd, task);
+  return task;
+}
+
+async function computeWorktreeFilesAndDiffs(worktree) {
   const cwd = worktree.path;
   const [branchResult, statusResult, numstatResult] = await Promise.all([
     runCommand('git', ['branch', '--show-current'], { cwd, timeout: 10_000 }).catch(() => ({
@@ -1531,12 +1566,36 @@ function freebuffWorkingFromLog(chatFile) {
     const lines = buffer.toString('utf8').split('\n');
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const line = lines[index];
-      if (!line.includes('"msg":"Start agent ') && !line.includes('"msg":"End agent ')) {
+      const sessionOver = line.includes('Freebuff session over');
+      if (
+        !sessionOver &&
+        !line.includes('"msg":"Start agent ') &&
+        !line.includes('"msg":"End agent ')
+      ) {
         continue;
+      }
+      if (sessionOver) {
+        working = false;
+        break;
       }
       const match = line.match(/"msg":"(Start|End) agent [^"]*? step \d+/);
       if (!match) continue;
-      working = match[1] === 'Start';
+      if (match[1] === 'Start') {
+        working = true;
+        break;
+      }
+      // An `End agent` with tool calls only ends the inference step, not the
+      // turn. The tools still have to run and the next inference step has not
+      // started yet, so keep the reasoning live across that gap.
+      try {
+        const row = JSON.parse(line);
+        working =
+          Array.isArray(row?.data?.toolCalls) &&
+          row.data.toolCalls.length > 0 &&
+          row?.data?.shouldEndTurn !== true;
+      } catch {
+        working = false;
+      }
       break;
     }
   } catch {
@@ -1702,14 +1761,20 @@ function listFreebuffChats(projectDir) {
 function parseFreebuffFile(chat, since = 0) {
   const fileStat = statSync(chat.file);
   const activity = freebuffWorkingFromLog(chat.file);
-  const stateFor = (chatWorking) =>
-    activity.working || chatWorking ? 'working' : 'idle';
+  // A model step ends before its tool call runs. Treat a running tool as live
+  // work too, otherwise the desk flips to idle and the reasoning animation
+  // stops while the tool is still executing.
+  const hasRunningTool = (list) =>
+    Array.isArray(list) &&
+    list.some((entry) => entry.kind === 'tool' && entry.running);
+  const stateFor = (chatWorking, entries = []) =>
+    activity.working || chatWorking || hasRunningTool(entries) ? 'working' : 'idle';
   const cached = freebuffSessionCache.get(chat.file);
   if (cached && since && fileStat.mtimeMs <= since) {
     // The client already has this exact file revision. Returning no entries
     // keeps live polling cheap; state is still refreshed because the run log
     // changes before and after the chat store is written.
-    const state = stateFor(Boolean(cached.chatWorking));
+    const state = stateFor(Boolean(cached.chatWorking), cached.payload.entries);
     cached.payload = { ...cached.payload, state };
     return {
       ...cached.payload,
@@ -1719,7 +1784,7 @@ function parseFreebuffFile(chat, since = 0) {
     };
   }
   if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
-    const state = stateFor(Boolean(cached.chatWorking));
+    const state = stateFor(Boolean(cached.chatWorking), cached.payload.entries);
     cached.payload = { ...cached.payload, state };
     return { ...cached.payload, fetchedAt: new Date().toISOString() };
   }
@@ -1743,7 +1808,7 @@ function parseFreebuffFile(chat, since = 0) {
     ok: true,
     chatId: chat.chatId,
     updatedAt: fileStat.mtimeMs,
-    state: stateFor(chatWorking),
+    state: stateFor(chatWorking, entries),
     entries,
     truncated:
       replayed.length > entries.length || messages.length > FREEBUFF_SESSION_MESSAGE_LIMIT,
@@ -1890,88 +1955,186 @@ function extractAgyNeedle(rawText) {
   return (bodyLines.join(' ').trim() || text).slice(0, 80);
 }
 
+const agySessionFileCache = new Map();
+const agyParsedLogCache = new Map();
+
+function readFileSlice(filePath, start, length) {
+  const fd = openSync(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(length);
+    const bytesRead = readSync(fd, buf, 0, length, start);
+    return buf.toString('utf8', 0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function getAgyLogSnapshot(filePath) {
+  const info = statSync(filePath);
+  const cached = agyParsedLogCache.get(filePath);
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+    return cached;
+  }
+
+  const tailLimit = 2 * 1024 * 1024;
+  const tailStart = Math.max(0, info.size - tailLimit);
+  let tailText = readFileSlice(filePath, tailStart, info.size - tailStart);
+  if (tailStart > 0) {
+    const firstNl = tailText.indexOf('\n');
+    if (firstNl !== -1) tailText = tailText.slice(firstNl + 1);
+  }
+  const headText =
+    tailStart === 0 ? tailText : readFileSlice(filePath, 0, Math.min(256 * 1024, info.size));
+
+  const userLines = [];
+  const collectUsers = (chunk) => {
+    for (const line of chunk.split('\n')) {
+      if (
+        line.includes('<USER_REQUEST>') ||
+        line.includes('"USER_INPUT"') ||
+        line.includes('"source":"USER"')
+      ) {
+        userLines.push(line);
+      }
+    }
+  };
+  collectUsers(headText);
+  if (tailStart > 0) collectUsers(tailText);
+  const userBlob = userLines.join('\n');
+
+  const calls = [];
+  const plain = [];
+  let latestThinking = '';
+  for (const line of tailText.split('\n')) {
+    if (line.includes('"PLANNER_RESPONSE"') && line.includes('"thinking"')) {
+      try {
+        const r = JSON.parse(line);
+        if (r.thinking?.trim()) latestThinking = r.thinking.trim();
+        if (r.thinking?.trim() && r.content?.trim() && !(r.tool_calls || []).length) {
+          plain.push({ key: r.content.trim().slice(0, 40), thinking: r.thinking.trim() });
+        }
+      } catch { /* skip */ }
+    }
+    if (!line.includes('tool_calls')) continue;
+    try {
+      const row = JSON.parse(line);
+      const thinking = typeof row.thinking === 'string' ? row.thinking.trim() : '';
+      if (thinking) latestThinking = thinking;
+      (row.tool_calls || []).forEach((call, n) => {
+        const d = agyToolDetail(call);
+        if (n === 0 && thinking) d.thinking = thinking;
+        calls.push(d);
+      });
+    } catch { /* skip */ }
+  }
+
+  const snapshot = {
+    mtimeMs: info.mtimeMs,
+    size: info.size,
+    userBlob,
+    calls,
+    plain,
+    latestThinking,
+  };
+  agyParsedLogCache.set(filePath, snapshot);
+  return snapshot;
+}
+
 // Orca's Agy transcript only says `execute`. Recover the real commands from the
 // Agy CLI's own transcript for the matching conversation.
-function enrichAgyTools(entries, state = '') {
+function enrichAgyTools(entries, state = '', sessionId = '') {
   try {
     const toolEntries = entries.filter((e) => e.kind === 'tool');
     if (!existsSync(AGY_BRAIN_DIR)) return entries;
-    const lastUser = [...entries].reverse().find((e) => e.role === 'user' && e.text)?.text || '';
-    const needle = extractAgyNeedle(lastUser);
-    const candidates = readdirSync(AGY_BRAIN_DIR)
-      .map((id) => join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl'))
-      .filter((f) => existsSync(f))
-      .map((f) => ({ f, m: statSync(f).mtimeMs }))
-      .sort((a, b) => b.m - a.m)
-      .slice(0, 12);
-    for (const { f } of candidates) {
-      const text = readFileSync(f, 'utf8');
-      if (needle && !text.includes(JSON.stringify(needle).slice(1, -1))) continue;
-      const calls = [];
-      const plain = [];
-      let latestThinking = '';
-      for (const line of text.split('\n')) {
-        if (line.includes('"PLANNER_RESPONSE"') && line.includes('"thinking"')) {
-          try {
-            const r = JSON.parse(line);
-            if (r.thinking?.trim()) latestThinking = r.thinking.trim();
-            if (r.thinking?.trim() && r.content?.trim() && !(r.tool_calls || []).length) {
-              plain.push({ key: r.content.trim().slice(0, 40), thinking: r.thinking.trim() });
-            }
-          } catch { /* skip */ }
-        }
-        if (!line.includes('tool_calls')) continue;
-        try {
-          const row = JSON.parse(line);
-          const thinking = typeof row.thinking === 'string' ? row.thinking.trim() : '';
-          if (thinking) latestThinking = thinking;
-          (row.tool_calls || []).forEach((call, n) => {
-            const d = agyToolDetail(call);
-            if (n === 0 && thinking) d.thinking = thinking;
-            calls.push(d);
-          });
-        } catch { /* skip */ }
+    const userEntries = entries.filter((e) => e.role === 'user' && e.text);
+    const firstNeedle = extractAgyNeedle(userEntries[0]?.text || '');
+    const lastNeedle = extractAgyNeedle(userEntries[userEntries.length - 1]?.text || '');
+    const needles = [lastNeedle, firstNeedle]
+      .filter((n, idx, arr) => n && arr.indexOf(n) === idx)
+      .map((n) => JSON.stringify(n).slice(1, -1));
+
+    const matchScore = (snap) => {
+      if (!needles.length) return 1;
+      let score = 0;
+      for (const n of needles) {
+        if (snap.userBlob.includes(n)) score += 2;
       }
-      if (!calls.length && !latestThinking) continue;
-      const tail = calls.slice(-toolEntries.length);
-      const offset = toolEntries.length - tail.length;
-      let i = 0;
-      const withPlain = (list) =>
-        list.flatMap((e, n) => {
-          if (e.kind !== 'message' || e.role !== 'assistant' || !e.text) return [e];
-          if (list[n - 1]?.kind === 'thinking') return [e];
-          const hit = plain.find((p) => e.text.trim().startsWith(p.key));
-          return hit ? [{ kind: 'thinking', role: 'assistant', text: hit.thinking.slice(0, 20000) }, e] : [e];
-        });
-      const enrichedList = withPlain(entries.flatMap((e) => {
-        if (e.kind !== 'tool') return [e];
-        const c = tail[i - offset >= 0 ? i - offset : 0];
-        const idx = i++;
-        if (idx < offset || !c) return [e];
-        const enriched = {
-          ...e,
-          detail: c.detail,
-          label: c.summary || '',
-          tool: c.tool,
-          ...(c.oldText ? { oldText: c.oldText } : {}),
-          ...(c.newText ? { newText: c.newText } : {}),
-          ...(c.diff ? { diff: c.diff } : {}),
-        };
-        return c.thinking
-          ? [{ kind: 'thinking', role: 'assistant', text: c.thinking.slice(0, 20000) }, enriched]
-          : [enriched];
-      }));
-      if (state === 'working' && latestThinking) {
-        const lastEntry = enrichedList[enrichedList.length - 1];
-        if (!lastEntry || (lastEntry.kind !== 'thinking' && lastEntry.text !== latestThinking)) {
-          const alreadyHas = enrichedList.some((e) => e.kind === 'thinking' && e.text === latestThinking.slice(0, 20000));
-          if (!alreadyHas) {
-            enrichedList.push({ kind: 'thinking', role: 'assistant', text: latestThinking.slice(0, 20000) });
-          }
-        }
-      }
-      return enrichedList;
+      return score;
+    };
+
+    let matchedSnap = null;
+    const cachedPath = sessionId ? agySessionFileCache.get(sessionId) : null;
+    if (cachedPath && existsSync(cachedPath)) {
+      const snap = getAgyLogSnapshot(cachedPath);
+      if (matchScore(snap) > 0) matchedSnap = snap;
     }
+
+    if (!matchedSnap) {
+      const candidates = readdirSync(AGY_BRAIN_DIR)
+        .map((id) => join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl'))
+        .filter((f) => existsSync(f))
+        .map((f) => ({ f, m: statSync(f).mtimeMs }))
+        .sort((a, b) => b.m - a.m)
+        .slice(0, 30);
+
+      let bestScore = 0;
+      for (const { f } of candidates) {
+        const snap = getAgyLogSnapshot(f);
+        const score = matchScore(snap);
+        if (score > bestScore) {
+          bestScore = score;
+          matchedSnap = snap;
+          if (sessionId) agySessionFileCache.set(sessionId, f);
+          if (score >= needles.length * 2) break;
+        }
+      }
+    }
+
+    if (!matchedSnap) return entries;
+    const { calls, plain, latestThinking } = matchedSnap;
+    if (!calls.length && !latestThinking) return entries;
+
+    const tail = calls.slice(-toolEntries.length);
+    const offset = toolEntries.length - tail.length;
+    let i = 0;
+    const withPlain = (list) =>
+      list.flatMap((e, n) => {
+        if (e.kind !== 'message' || e.role !== 'assistant' || !e.text) return [e];
+        if (list[n - 1]?.kind === 'thinking') return [e];
+        const hit = plain.find((p) => e.text.trim().startsWith(p.key));
+        return hit ? [{ kind: 'thinking', role: 'assistant', text: hit.thinking.slice(0, 20000) }, e] : [e];
+      });
+    const enrichedList = withPlain(entries.flatMap((e) => {
+      if (e.kind !== 'tool') return [e];
+      const c = tail[i - offset >= 0 ? i - offset : 0];
+      const idx = i++;
+      if (idx < offset || !c) return [e];
+      const enriched = {
+        ...e,
+        detail: c.detail,
+        label: c.summary || '',
+        tool: c.tool,
+        ...(c.oldText ? { oldText: c.oldText } : {}),
+        ...(c.newText ? { newText: c.newText } : {}),
+        ...(c.diff ? { diff: c.diff } : {}),
+      };
+      return c.thinking
+        ? [{ kind: 'thinking', role: 'assistant', text: c.thinking.slice(0, 20000) }, enriched]
+        : [enriched];
+    }));
+    const toolStillRunning = toolEntries.some((entry) =>
+      /running|pending|in[_-]?progress|executing/i.test(String(entry.state || '')),
+    );
+    if ((state === 'working' || toolStillRunning) && latestThinking) {
+      const lastEntry = enrichedList[enrichedList.length - 1];
+      if (!lastEntry || (lastEntry.kind !== 'thinking' && lastEntry.text !== latestThinking)) {
+        const alreadyHas = enrichedList.some((e) => e.kind === 'thinking' && e.text === latestThinking.slice(0, 20000));
+        if (!alreadyHas) {
+          enrichedList.push({ kind: 'thinking', role: 'assistant', text: latestThinking.slice(0, 20000) });
+        }
+      }
+    }
+    return enrichedList;
   } catch { /* fall back to plain entries */ }
   return entries;
 }
@@ -2136,11 +2299,32 @@ function stripUserEnvelope(rawText) {
   return kept.join('\n').trim() || text;
 }
 
+const transcriptCache = new Map();
+const transcriptInflight = new Map();
+
 async function readTranscript(sessionId) {
   const id = typeof sessionId === 'string' ? sessionId.trim() : '';
   if (!/^[a-f0-9-]{20,64}$/i.test(id)) {
     throw new Error('세션 ID가 올바르지 않습니다.');
   }
+  const cached = transcriptCache.get(id);
+  if (cached && Date.now() - cached.at < 250) return cached.data;
+  const inflight = transcriptInflight.get(id);
+  if (inflight) return inflight;
+
+  const task = computeReadTranscript(id)
+    .then((data) => {
+      transcriptCache.set(id, { at: Date.now(), data });
+      return data;
+    })
+    .finally(() => {
+      transcriptInflight.delete(id);
+    });
+  transcriptInflight.set(id, task);
+  return task;
+}
+
+async function computeReadTranscript(id) {
   const [raw, sessionOptions] = await Promise.all([
     runOrca(['agent', 'read', `orca_session_id:${id}`, '--limit', '100', '--json'], 30_000),
     readOrcaSessionOptions(id),
@@ -2148,7 +2332,7 @@ async function readTranscript(sessionId) {
   const data = raw?.result || raw;
   const rawEntries =
     data?.agent === 'antigravity' && Array.isArray(data?.entries)
-      ? enrichAgyTools(data.entries, data?.state || '')
+      ? enrichAgyTools(data.entries, data?.state || '', id)
       : Array.isArray(data?.entries)
         ? data.entries
         : [];
@@ -2157,13 +2341,20 @@ async function readTranscript(sessionId) {
       ? { ...entry, text: stripUserEnvelope(entry.text) }
       : entry,
   );
+  // Orca can report the agent as done between an inference step and its tool
+  // execution. A tool that is still running means the turn is not done.
+  const hasRunningTool = entries.some(
+    (entry) =>
+      entry.kind === 'tool' &&
+      /running|pending|in[_-]?progress|executing/i.test(String(entry.state || '')),
+  );
   return {
     ok: true,
     orcaSessionId: id,
     kind: data?.kind || null,
     agent: data?.agent || null,
     source: data?.source || 'transcript',
-    state: data?.state || null,
+    state: hasRunningTool ? 'working' : data?.state || null,
     model: sessionOptions?.model || data?.model || null,
     effort: sessionOptions?.effort || data?.effort || null,
     entries,
@@ -2265,11 +2456,11 @@ async function sendTerminalMessage(body) {
       ],
       10_000,
     );
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 120));
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
   }
 
   const args = ['terminal', 'send', '--terminal', handle, '--text', outboundText, '--enter'];
-  if (waitForSubmit) args.push('--wait-submit', '8');
+  if (waitForSubmit) args.push('--wait-submit', '2');
   args.push('--json');
   const result = await runOrca(args, 30_000);
   return { ok: true, handle, result };
@@ -3218,6 +3409,7 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`  Orca desk bridge: http://127.0.0.1:${PORT}`);
+  void getOverview().catch(() => undefined);
 });
 
 function shutdown() {
