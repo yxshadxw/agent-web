@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { handleMarkdownClick } from '../lib/markdown';
 import {
   Activity,
   AlertTriangle,
@@ -32,6 +31,7 @@ import {
   Loader2,
   Menu,
   MessageSquare,
+  Minimize2,
   Minus,
   MoreHorizontal,
   PanelRight,
@@ -46,6 +46,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Smartphone,
   Trash2,
   Sparkles,
   SquareTerminal,
@@ -58,7 +59,9 @@ import {
 import type { File as AgentFile, FileDiff } from '@opencode-ai/sdk';
 import { useAgyQuota } from '../hooks/useQuota';
 import { QuotaSection, type CodexQuotaSnapshot } from './Quota';
-import { InfoPanel, type TeamTreeAgent } from './InfoPanel';
+import { InfoPanel, type LiveFileEntry, type TeamTreeAgent } from './InfoPanel';
+import { BackgroundRunChips, type BackgroundRunItem } from './BackgroundRunChips';
+import { AndroidModal } from './AndroidModal';
 import { ToolDiff, hasDiffSignal } from './ToolDiff';
 import {
   orcaApi,
@@ -81,7 +84,6 @@ import {
 } from '../lib/orca';
 import {
   cleanUserMessage,
-  highlightQuotaWarningsHtml,
   isQuotaWarningLine,
   relativeTime,
   shortPath,
@@ -93,6 +95,9 @@ import { LiquidBackdrop } from './LiquidBackdrop';
 import { TodoBar, deriveTodosFromTools } from './TodoBar';
 import { Sheet } from './Sheet';
 import { SelectMenu } from './SelectMenu';
+import { useStreamMarkdown, type StreamEffect } from '../lib/streamFx';
+import { smoothScrollToBottom } from '../lib/smoothScroll';
+import { RevealText } from './StreamText';
 
 type DeskTab = 'agents' | 'github' | 'instructions' | 'memory' | 'messages';
 type RunMode = 'single' | 'parallel';
@@ -208,6 +213,9 @@ const MODEL_OPTIONS: Record<string, ModelOption[]> = {
     { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
     { id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' },
     { id: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
+    { id: 'gemini-4-carbon-medium', label: 'Gemini 4 Carbon (Medium)' },
+    { id: 'gemini-4-carbon-high', label: 'Gemini 4 Carbon (High)' },
+    { id: 'gemini-4-carbon-low', label: 'Gemini 4 Carbon (Low)' },
     { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
     { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
     { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
@@ -216,7 +224,8 @@ const MODEL_OPTIONS: Record<string, ModelOption[]> = {
     { id: 'gemini-4-hydrogen-medium', label: 'Gemini 4 Hydrogen (Medium)' },
     { id: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen (Low)' },
     { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator (Neon)' },
-    { id: 'gemini-pro-orchestrator-g1-pro', label: 'Orchestrator (Argon)' },
+    { id: 'gemini-pro-orchestrator', label: 'Orchestrator (Carbon)' },
+    { id: 'gemini-pro-orchestrator-argon', label: 'Orchestrator (Argon)' },
     { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
     { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
     { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
@@ -419,6 +428,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [expandedCoords, setExpandedCoords] = useState<Record<string, boolean>>({});
   const [deskInfoOpen, setDeskInfoOpen] = useState(false);
+  const [deskAndroidOpen, setDeskAndroidOpen] = useState(false);
   const [deskInfoTab, setDeskInfoTab] = useState<InfoTab>('info');
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -427,6 +437,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   const deskMenuRef = useRef<HTMLDivElement>(null);
   const quickInputRef = useRef<HTMLInputElement>(null);
   const [deskWorktreeDiff, setDeskWorktreeDiff] = useState<WorktreeDiffPayload | null>(null);
+  const [deskLiveFiles, setDeskLiveFiles] = useState<LiveFileEntry[]>([]);
   const [deskPins, setDeskPins] = useState<PinnedFile[]>([]);
   const [deskCodexQuota, setDeskCodexQuota] = useState<CodexQuotaSnapshot | null>(null);
   const { quota: deskAgyQuota, loading: deskQuotaLoading, refresh: refreshDeskQuota } = useAgyQuota(true);
@@ -466,7 +477,9 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
           );
         });
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Orca 런타임에 연결하지 못했습니다.');
+        if (!quiet || !deskReadyRef.current) {
+          setError(cause instanceof Error ? cause.message : 'Orca 런타임에 연결하지 못했습니다.');
+        }
       } finally {
         loadingRef.current = false;
         setLoading(false);
@@ -476,11 +489,25 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
   );
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load(false, true);
-    }, 3500);
-    return () => window.clearInterval(timer);
+    let closed = false;
+    let timer = 0;
+    const poll = () => {
+      if (closed) return;
+      timer = window.setTimeout(() => {
+        void (async () => {
+          if (closed) return;
+          if (document.visibilityState === 'visible') await load(false, true);
+          poll();
+        })();
+      }, 400);
+    };
+    void load().then(() => {
+      if (!closed) poll();
+    });
+    return () => {
+      closed = true;
+      window.clearTimeout(timer);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -556,14 +583,28 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (!deskInfoOpen && !deskMenuOpen) return;
-    if (!selectedWorktree?.path) return;
+    const targetPath = logAgent?.path || selectedWorktree?.path;
+    if (!targetPath) return;
     let alive = true;
-    void orcaApi
-      .worktreeDiff(selectedWorktree.path)
-      .then((res) => {
-        if (alive && res.ok) setDeskWorktreeDiff(res);
-      })
-      .catch(() => undefined);
+    let timer = 0;
+    const fetchDiff = () =>
+      orcaApi
+        .worktreeDiff(targetPath)
+        .then((res) => {
+          if (alive && res.ok) setDeskWorktreeDiff(res);
+        })
+        .catch(() => undefined);
+    const pollDiff = () => {
+      if (!alive || !deskInfoOpen) return;
+      timer = window.setTimeout(() => {
+        void fetchDiff().then(() => {
+          if (alive) pollDiff();
+        });
+      }, 500);
+    };
+    void fetchDiff().then(() => {
+      if (alive) pollDiff();
+    });
     void fetch('/codex-api/quota', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -574,8 +615,9 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
       .catch(() => undefined);
     return () => {
       alive = false;
+      if (timer) window.clearTimeout(timer);
     };
-  }, [deskInfoOpen, deskMenuOpen, selectedWorktree?.path]);
+  }, [deskInfoOpen, deskMenuOpen, logAgent?.path, selectedWorktree?.path]);
 
   const openDeskInfo = useCallback(
     (nextTab: InfoTab = 'info') => {
@@ -769,7 +811,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
     if (!quickOpen) return;
     document
       .getElementById(`desk-quick-option-${quickIndex}`)
-      ?.scrollIntoView({ block: 'nearest' });
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [quickIndex, quickOpen]);
 
   const openLog = useCallback((agent: OrcaAgent) => {
@@ -1141,6 +1183,15 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
             <div className="desk-top-actions" ref={deskMenuRef}>
               <button
                 type="button"
+                className="desk-icon"
+                onClick={() => setDeskAndroidOpen(true)}
+                aria-label="안드로이드 noVNC 열기"
+                title="안드로이드 (noVNC)"
+              >
+                <Smartphone size={17} />
+              </button>
+              <button
+                type="button"
                 className="desk-icon desk-quick-trigger"
                 onClick={openQuickSwitch}
                 aria-label="빠른 이동"
@@ -1508,6 +1559,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
           onOverview={setOverview}
           onContinue={setLogAgent}
           onOpenInfo={openDeskInfo}
+          onLiveFiles={setDeskLiveFiles}
         />
       )}
       {(() => {
@@ -1551,6 +1603,7 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
             }
             parentSession={null}
             messages={[]}
+            liveFiles={deskLiveFiles}
             diffs={(deskWorktreeDiff?.diffs || []) as FileDiff[]}
             children={[]}
             gitFiles={(deskWorktreeDiff?.files || []) as AgentFile[]}
@@ -1617,6 +1670,8 @@ export function ParallelDesk({ onClose }: { onClose: () => void }) {
           {notice}
         </div>
       )}
+
+      <AndroidModal open={deskAndroidOpen} onClose={() => setDeskAndroidOpen(false)} />
     </div>
   );
 }
@@ -2667,11 +2722,25 @@ function MessagesTab({
   }, []);
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, 4000);
-    return () => window.clearInterval(timer);
+    let closed = false;
+    let timer = 0;
+    const poll = () => {
+      if (closed) return;
+      timer = window.setTimeout(() => {
+        void (async () => {
+          if (closed) return;
+          if (document.visibilityState === 'visible') await load();
+          poll();
+        })();
+      }, 500);
+    };
+    void load().then(() => {
+      if (!closed) poll();
+    });
+    return () => {
+      closed = true;
+      window.clearTimeout(timer);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -2857,6 +2926,30 @@ function MessagesTab({
   );
 }
 
+function BatonLine({ from, to }: { from: string; to: string }) {
+  return (
+    <div className="desk-baton" role="note" aria-label={`인수인계: ${from} → ${to}`}>
+      <i className="desk-baton-rail l" aria-hidden="true" />
+      <div className="desk-baton-mid">
+        <span className="desk-baton-label">BATON TOUCH</span>
+        <span className="desk-baton-from">{from}</span>
+        <span className="desk-baton-to">{to}</span>
+      </div>
+      <i className="desk-baton-rail r" aria-hidden="true" />
+    </div>
+  );
+}
+
+function DeskRunChips({
+  runs,
+  onDismiss,
+}: {
+  runs: BackgroundRunItem[];
+  onDismiss?: (id: string) => void;
+}) {
+  return <BackgroundRunChips runs={runs} onDismiss={onDismiss} />;
+}
+
 function DeskLoading({ text }: { text: string }) {
   return (
     <div className="desk-loading">
@@ -2869,117 +2962,53 @@ function DeskLoading({ text }: { text: string }) {
 const TranscriptMarkdown = memo(function TranscriptMarkdown({
   text,
   className = 'desk-transcript-md',
+  animate = false,
+  effect = 'bounce',
 }: {
   text: string;
   className?: string;
+  animate?: boolean;
+  effect?: StreamEffect;
 }) {
-  const html = useMemo(
-    () =>
-      highlightQuotaWarningsHtml(
-        DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }) as string, {
-          ADD_ATTR: ['target'],
-          FORBID_TAGS: ['style', 'form', 'input'],
-        }),
-      ),
-    [text],
+  const revealed = useStreamMarkdown(text, animate);
+  return (
+    <div
+      className={`md ${className}`}
+      data-fx={effect}
+      onClick={handleMarkdownClick}
+      dangerouslySetInnerHTML={{ __html: revealed }}
+    />
   );
-  return <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
 });
-
-/**
- * Reveal appended reasoning at a steady 24fps instead of swapping a whole
- * paragraph in on every poll. The source may arrive in chunks, but the eye sees
- * one continuous stream.
- */
-function useSmoothText(text: string, active: boolean) {
-  // Start from the saved text. Re-entering a working session must not replay
-  // reasoning the model already produced; only later appended chunks type in.
-  const [shown, setShown] = useState(text);
-  const shownRef = useRef(shown);
-  const frameRef = useRef(0);
-  const activeRef = useRef(active);
-  activeRef.current = active;
-
-  useEffect(() => {
-    const from = shownRef.current;
-    if (text === from) return;
-
-    // A poll can briefly return a prefix while Freebuff flushes its chat store.
-    // Never erase text that is already visible; wait for the next full chunk.
-    if (from.length > text.length && from.startsWith(text)) return;
-
-    if (!text.startsWith(from)) {
-      window.cancelAnimationFrame(frameRef.current);
-      frameRef.current = 0;
-      shownRef.current = text;
-      setShown(text);
-      return;
-    }
-
-    const added = text.length - from.length;
-    // A finished block must not keep typing underneath a tool card. Big chunks
-    // are also flushed at step boundaries, so show them immediately instead of
-    // making the following tool look like it arrived first.
-    if (!activeRef.current || added > 1_600) {
-      window.cancelAnimationFrame(frameRef.current);
-      frameRef.current = 0;
-      shownRef.current = text;
-      setShown(text);
-      return;
-    }
-
-    const duration = Math.min(1_600, Math.max(180, added * 1.15));
-    const startedAt = performance.now();
-    let lastPaint = 0;
-    window.cancelAnimationFrame(frameRef.current);
-
-    const tick = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      if (progress === 1 || now - lastPaint >= 24) {
-        const next = text.slice(0, from.length + Math.ceil(added * progress));
-        if (next !== shownRef.current) {
-          shownRef.current = next;
-          setShown(next);
-        }
-        lastPaint = now;
-      }
-      if (progress < 1) frameRef.current = window.requestAnimationFrame(tick);
-      else frameRef.current = 0;
-    };
-    frameRef.current = window.requestAnimationFrame(tick);
-
-    return () => {
-      window.cancelAnimationFrame(frameRef.current);
-      frameRef.current = 0;
-    };
-  }, [text]);
-
-  // If the turn goes idle while the reveal is still in flight, finish it on
-  // the same render so a tool card is never shown above a half-typed thought.
-  useEffect(() => {
-    if (active || shownRef.current === text) return;
-    window.cancelAnimationFrame(frameRef.current);
-    frameRef.current = 0;
-    shownRef.current = text;
-    setShown(text);
-  }, [active, text]);
-
-  useEffect(() => () => window.cancelAnimationFrame(frameRef.current), []);
-
-  return active ? shown : text;
-}
 
 const SmoothTranscriptMarkdown = memo(function SmoothTranscriptMarkdown({
   text,
   active,
   className,
+  effect = 'ember',
 }: {
   text: string;
   active: boolean;
   className?: string;
+  effect?: StreamEffect;
 }) {
-  const shown = useSmoothText(text, active);
-  return <TranscriptMarkdown text={shown} className={className} />;
+  const prevLenRef = useRef(text.length);
+  const [animating, setAnimating] = useState(active);
+  useEffect(() => {
+    if (active || text.length > prevLenRef.current) {
+      setAnimating(true);
+    }
+    prevLenRef.current = text.length;
+  }, [active, text]);
+
+  return (
+    <TranscriptMarkdown
+      text={text}
+      className={className}
+      animate={active || animating}
+      effect={effect}
+    />
+  );
 });
 
 /**
@@ -2996,7 +3025,7 @@ const FreebuffThought = memo(function FreebuffThought({
   live: boolean;
   streaming: boolean;
 }) {
-  const [open, setOpen] = useState(live);
+  const [open, setOpen] = useState(true);
   const wasLive = useRef(live);
 
   useEffect(() => {
@@ -3017,7 +3046,11 @@ const FreebuffThought = memo(function FreebuffThought({
         <small>{entry.text.length.toLocaleString('ko-KR')}자</small>
       </summary>
       <div className={`desk-freebuff-think-body ${streaming ? 'is-streaming' : ''}`}>
-        <SmoothTranscriptMarkdown text={entry.text} active={streaming} />
+        <RevealText
+          text={entry.text}
+          active={live || streaming}
+          className="desk-transcript-md"
+        />
       </div>
     </details>
   );
@@ -3776,29 +3809,33 @@ function AgyToolRow({ tool }: { tool: TranscriptEntry }) {
 
 function AgyThinking({ texts, busy }: { texts: string[]; busy: boolean }) {
   const [open, setOpen] = useState(true);
+  const wasLive = useRef(busy);
+  const text = texts.join('\n\n');
+
+  useEffect(() => {
+    // Open when a new reasoning block starts. Do not close it when a tool or
+    // answer begins: the user wants to keep reading the reasoning while work
+    // continues below it.
+    if (busy && !wasLive.current) setOpen(true);
+    wasLive.current = busy;
+  }, [busy]);
+
   return (
-    <div className="thinking desk-agy-thinking">
-      <button
-        className="thinking-head"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
-        {open ? (
-          <ChevronDown size={15} className="chev open" />
-        ) : (
-          <ChevronRight size={15} className="chev" />
-        )}
-        <span>생각</span>
+    <details
+      className={`desk-freebuff-think desk-agy-think ${busy ? 'is-live' : ''}`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary aria-label={busy ? '추론 중' : '추론'}>
+        <ChevronRight size={13} className="desk-think-chev" />
+        <span>추론</span>
         {busy && <span className="thinking-live" />}
-      </button>
-      {open && (
-        <div className="thinking-body reasoning-body">
-          {texts.map((text, index) => (
-            <p key={`${index}-${text.slice(0, 16)}`}>{text}</p>
-          ))}
-        </div>
-      )}
-    </div>
+        <small>{text.length.toLocaleString('ko-KR')}자</small>
+      </summary>
+      <div className="desk-freebuff-think-body reasoning-body">
+        <RevealText text={text} active={busy} className="desk-transcript-md" />
+      </div>
+    </details>
   );
 }
 
@@ -3847,6 +3884,19 @@ function AgyChatThread({
 
   if (groups.length === 0) return null;
 
+  const lastThinkingIndex = groups.reduce(
+    (last, group, index) => (group.kind === 'thinking' ? index : last),
+    -1,
+  );
+  const lastUserIndex = groups.reduce(
+    (last, group, index) => (group.kind === 'user' ? index : last),
+    -1,
+  );
+  // Keep this turn's last reasoning live even when tool cards (or a partial
+  // answer) have been appended after it. A new user turn clears it.
+  const liveThinkingIndex =
+    busy && lastThinkingIndex > lastUserIndex ? lastThinkingIndex : -1;
+
   return (
     <div className="desk-agy-thread">
       {groups.map((group, index) => {
@@ -3862,7 +3912,7 @@ function AgyChatThread({
             <AgyThinking
               key={`thinking-${index}`}
               texts={group.texts}
-              busy={busy && index === groups.length - 1}
+              busy={busy && index === liveThinkingIndex}
             />
           );
         }
@@ -3877,7 +3927,11 @@ function AgyChatThread({
         }
         return (
           <div className="assistant-text desk-agy-answer" key={`assistant-${index}`}>
-            <TranscriptMarkdown text={group.text} className="desk-agy-md" />
+            <SmoothTranscriptMarkdown
+              text={group.text}
+              className="desk-agy-md"
+              active={busy && index === groups.length - 1}
+            />
           </div>
         );
       })}
@@ -3965,7 +4019,7 @@ function HandoffSheet({
   overview: OrcaOverview | null;
   brief: string;
   onClose: () => void;
-  onSent: (message: string) => void;
+  onSent: (message: string, target?: OrcaAgent) => void;
 }) {
   const eligible = (agents: OrcaAgent[]) =>
     agents.filter(
@@ -4018,7 +4072,10 @@ function HandoffSheet({
         throw new Error(result.error || '인수인계 메시지를 전달하지 못했어요.');
       }
       const target = agents.find((agent) => agent.id === toId);
-      onSent(target ? `${target.title}에 인수인계했어요` : '인수인계 메시지를 전달했어요');
+      onSent(
+        target ? `${target.title}에 인수인계했어요` : '인수인계 메시지를 전달했어요',
+        target,
+      );
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '인수인계 메시지를 전달하지 못했어요.');
@@ -4112,6 +4169,7 @@ function LogDrawer({
   onOverview,
   onContinue,
   onOpenInfo,
+  onLiveFiles,
 }: {
   agent: OrcaAgent;
   overview: OrcaOverview | null;
@@ -4120,6 +4178,7 @@ function LogDrawer({
   onOverview: (overview: OrcaOverview) => void;
   onContinue: (agent: OrcaAgent) => void;
   onOpenInfo?: (tab?: InfoTab) => void;
+  onLiveFiles?: (files: LiveFileEntry[]) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TerminalSnapshot | null>(null);
   const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
@@ -4156,6 +4215,7 @@ function LogDrawer({
   const [freebuffSwitching, setFreebuffSwitching] = useState(false);
   const [freebuffTimeLeft, setFreebuffTimeLeft] = useState<string | null>(null);
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [baton, setBaton] = useState<{ from: string; to: string } | null>(null);
   const [autoRecovery, setAutoRecovery] = useState<
     'idle' | 'resuming' | 'sending' | 'done' | 'failed'
   >('idle');
@@ -4396,8 +4456,11 @@ function LogDrawer({
   // A chat stays a chat even if Orca also exposes a terminal handle for it.
   const canShowTerminal = Boolean(agent.terminalHandle) && !isChat;
   const isThinking =
-    (isFreebuff && freebuffSession?.state === 'working') ||
-    (transcript ? transcript.state === 'working' : agent.state === 'working');
+    hasTranscript && transcript?.state
+      ? transcript.state === 'working'
+      : isFreebuff && freebuffSession?.state
+        ? freebuffSession.state === 'working'
+        : agent.state === 'working';
   const freebuffStreaming = isFreebuff && (isThinking || freebuffHot);
   const displayTail = useMemo(
     () => (isFreebuff ? cleanFreebuffTail(snapshot?.tail ?? []) : snapshot?.tail ?? []),
@@ -4482,12 +4545,64 @@ function LogDrawer({
         .includes(logNeedle),
     );
   }, [agyEntries, logNeedle]);
-  // Only the final entry of the visible timeline can still be streaming. This
-  // keeps a thought from a previous turn from animating while the next turn is
-  // already running (which made old reasoning look like it arrived late).
+
+  useEffect(() => {
+    if (!onLiveFiles) return;
+    const byPath = new Map<string, LiveFileEntry>();
+    for (const entry of freebuffSessionEntries) {
+      if (entry.kind !== 'tool') continue;
+      if (!/write|edit|str_replace|patch|create_file/i.test(entry.name || '')) continue;
+      const rawPath = (entry.file || freebuffToolHead(entry) || entry.name || '').split('\n')[0].trim();
+      if (!rawPath) continue;
+      const after = entry.newText || entry.diff || '';
+      if (!entry.running && !after) continue;
+      byPath.set(rawPath, {
+        path: rawPath,
+        name: rawPath.split('/').pop() || rawPath,
+        status: entry.running ? 'writing' : 'saved',
+        additions: entry.additions ?? (after ? after.split('\n').length : 0),
+        deletions: entry.deletions ?? 0,
+        before: entry.oldText || '',
+        after: after || entry.command,
+      });
+    }
+    for (const entry of agyEntries) {
+      if (entry.kind !== 'tool') continue;
+      const meta = agyToolDisplay(entry.tool || entry.name || '');
+      if (meta.kind !== 'write') continue;
+      const rawPath = (entry.detail || entry.label || entry.name || '').split('\n')[0].trim();
+      if (!rawPath) continue;
+      const state = String(entry.state || 'completed').toLowerCase();
+      const running = state === 'running' || state === 'pending';
+      const after = entry.newText || entry.diff || '';
+      if (!running && !after) continue;
+      byPath.set(rawPath, {
+        path: rawPath,
+        name: rawPath.split('/').pop() || rawPath,
+        status: running ? 'writing' : 'saved',
+        additions: after ? after.split('\n').length : 0,
+        deletions: 0,
+        before: entry.oldText || '',
+        after: after || entry.detail || entry.text || '',
+      });
+    }
+    onLiveFiles([...byPath.values()]);
+  }, [agyEntries, freebuffSessionEntries, onLiveFiles]);
+  // A reasoning block can keep growing after a tool card is inserted. Keep the
+  // last non-answer reasoning live so a running tool does not make it look like
+  // the model stopped thinking.
   const lastVisibleFreebuffEntry = visibleFreebuffEntries[visibleFreebuffEntries.length - 1];
-  const lastThinkingIndex =
-    lastVisibleFreebuffEntry?.kind === 'thinking' ? visibleFreebuffEntries.length - 1 : -1;
+  const lastThinkingIndex = visibleFreebuffEntries.reduce(
+    (last, entry, index) => (entry.kind === 'thinking' ? index : last),
+    -1,
+  );
+  const lastUserAnyIndex = visibleFreebuffEntries.reduce(
+    (last, entry, index) =>
+      entry.kind === 'message' && entry.role === 'user' ? index : last,
+    -1,
+  );
+  const liveThinkingIndex =
+    isThinking && lastThinkingIndex > lastUserAnyIndex ? lastThinkingIndex : -1;
   const lastAssistantIndex =
     lastVisibleFreebuffEntry?.kind === 'message' && lastVisibleFreebuffEntry.role === 'assistant'
       ? visibleFreebuffEntries.length - 1
@@ -4592,6 +4707,69 @@ function LogDrawer({
       .map((e) => e.text || '');
     return deriveTodosFromTools(agyTools, agyTexts, isThinking);
   }, [agyEntries, isThinking]);
+
+  const [dismissedDeskRuns, setDismissedDeskRuns] = useState<Set<string>>(() => new Set());
+  const activeRuns = useMemo<BackgroundRunItem[]>(() => {
+    if (isFreebuff) {
+      let lastUserIdx = -1;
+      for (let i = freebuffSessionEntries.length - 1; i >= 0; i -= 1) {
+        const item = freebuffSessionEntries[i];
+        if (item.kind === 'message' && item.role === 'user') {
+          lastUserIdx = i;
+          break;
+        }
+      }
+      const turn = lastUserIdx >= 0 ? freebuffSessionEntries.slice(lastUserIdx + 1) : freebuffSessionEntries;
+      return turn
+        .flatMap((entry, index): BackgroundRunItem[] => {
+          if (entry.kind !== 'tool') return [];
+          const isBg = entry.running || /bash|shell|bg_run|command|exec|run/i.test(entry.name || '');
+          if (!isBg) return [];
+          const id = entry.id || `tool-${index}`;
+          if (dismissedDeskRuns.has(id)) return [];
+          return [
+            {
+              id,
+              label: (freebuffToolHead(entry) || freebuffToolLabel(entry.name) || '작업').slice(0, 34),
+              detail: entry.command,
+              output: entry.output,
+              status: entry.running ? 'running' : entry.error ? 'stopped' : 'done',
+            },
+          ];
+        })
+        .slice(-4);
+    }
+    if (isAgyChat) {
+      let lastUserIdx = -1;
+      for (let i = agyEntries.length - 1; i >= 0; i -= 1) {
+        const item = agyEntries[i];
+        if (item.kind === 'message' && item.role === 'user') {
+          lastUserIdx = i;
+          break;
+        }
+      }
+      const turn = lastUserIdx >= 0 ? agyEntries.slice(lastUserIdx + 1) : agyEntries;
+      return turn
+        .flatMap((entry, index): BackgroundRunItem[] => {
+          if (entry.kind !== 'tool') return [];
+          const isBg = entry.state === 'running' || /bash|shell|bg_run|command|exec|run/i.test(entry.tool || entry.name || '');
+          if (!isBg) return [];
+          const id = `${entry.name || entry.tool || 'tool'}-${index}`;
+          if (dismissedDeskRuns.has(id)) return [];
+          const st = String(entry.state || 'completed').toLowerCase();
+          return [
+            {
+              id,
+              label: (entry.label || entry.name || entry.tool || '도구').slice(0, 34),
+              detail: entry.detail || entry.text || '',
+              status: st === 'running' || st === 'pending' ? 'running' : st === 'failed' || st === 'error' ? 'stopped' : 'done',
+            },
+          ];
+        })
+        .slice(-4);
+    }
+    return [];
+  }, [agyEntries, dismissedDeskRuns, freebuffSessionEntries, isAgyChat, isFreebuff]);
 
   const handoffBrief = useMemo(
     () =>
@@ -4768,7 +4946,7 @@ function LogDrawer({
       // The structured Freebuff store is the authoritative fast path. Its
       // terminal tail is only needed for model/time chrome, so read it less
       // often instead of blocking the session poll every 500ms.
-      const terminalInterval = isFreebuff ? 1600 : 800;
+      const terminalInterval = isFreebuff ? 250 : 120;
       if (
         agent.terminalHandle &&
         (!isFreebuff ||
@@ -4786,7 +4964,9 @@ function LogDrawer({
           setError(null);
         } catch (cause) {
           if (token !== loadTokenRef.current) return;
-          setError(cause instanceof Error ? cause.message : '로그를 읽지 못했어요.');
+          if (!snapshotRef.current && !transcript) {
+            setError(cause instanceof Error ? cause.message : '로그를 읽지 못했어요.');
+          }
         }
       }
     } finally {
@@ -4889,13 +5069,7 @@ function LogDrawer({
     let sessionTimer = 0;
     const pollSession = () => {
       if (sessionPollClosed || !isFreebuff) return;
-      const delay = isThinking
-        ? isOpenCode
-          ? 120
-          : 50
-        : isOpenCode
-          ? 600
-          : 180;
+      const delay = isThinking ? 80 : 220;
       sessionTimer = window.setTimeout(() => {
         void (async () => {
           if (sessionPollClosed) return;
@@ -4906,9 +5080,20 @@ function LogDrawer({
     };
     if (isFreebuff) pollSession();
 
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, isFreebuff ? 900 : isThinking ? 450 : 1000);
+    let loadClosed = false;
+    let loadTimer = 0;
+    const pollLoad = () => {
+      if (loadClosed) return;
+      const delay = isThinking ? 80 : 220;
+      loadTimer = window.setTimeout(() => {
+        void (async () => {
+          if (loadClosed) return;
+          if (document.visibilityState === 'visible') await load();
+          pollLoad();
+        })();
+      }, delay);
+    };
+    pollLoad();
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         void load();
@@ -4917,8 +5102,9 @@ function LogDrawer({
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      loadClosed = true;
       sessionPollClosed = true;
-      window.clearInterval(timer);
+      window.clearTimeout(loadTimer);
       window.clearTimeout(sessionTimer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
@@ -4928,44 +5114,58 @@ function LogDrawer({
   useEffect(() => {
     if (!agent.orcaSessionId) return;
     const expectedSessionId = agent.orcaSessionId;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void orcaApi
-          .transcript(expectedSessionId)
-          .then((next) => {
-            if (next.orcaSessionId && next.orcaSessionId !== expectedSessionId) return;
-            setTranscript((current) => {
-              if (!current) return next;
-              if (
-                current.entries.length > 0 &&
-                (!next.entries || next.entries.length === 0)
-              ) {
-                return current;
-              }
-              if (
-                current.state === next.state &&
-                current.model === next.model &&
-                current.effort === next.effort &&
-                current.entries.length === next.entries.length
-              ) {
-                const lastCur = current.entries[current.entries.length - 1];
-                const lastNext = next.entries[next.entries.length - 1];
+    let closed = false;
+    let timer = 0;
+    const pollTranscript = () => {
+      if (closed) return;
+      timer = window.setTimeout(() => {
+        void (async () => {
+          if (closed) return;
+          if (document.visibilityState === 'visible') {
+            try {
+              const next = await orcaApi.transcript(expectedSessionId);
+              if (closed) return;
+              if (next.orcaSessionId && next.orcaSessionId !== expectedSessionId) return;
+              setTranscript((current) => {
+                if (!current) return next;
                 if (
-                  lastCur?.kind === lastNext?.kind &&
-                  lastCur?.text === lastNext?.text &&
-                  lastCur?.state === lastNext?.state &&
-                  lastCur?.detail === lastNext?.detail
+                  current.entries.length > 0 &&
+                  (!next.entries || next.entries.length === 0)
                 ) {
                   return current;
                 }
-              }
-              return next;
-            });
-          })
-          .catch(() => undefined);
-      }
-    }, 900);
-    return () => window.clearInterval(timer);
+                if (
+                  current.state === next.state &&
+                  current.model === next.model &&
+                  current.effort === next.effort &&
+                  current.entries.length === next.entries.length
+                ) {
+                  const lastCur = current.entries[current.entries.length - 1];
+                  const lastNext = next.entries[next.entries.length - 1];
+                  if (
+                    lastCur?.kind === lastNext?.kind &&
+                    lastCur?.text === lastNext?.text &&
+                    lastCur?.state === lastNext?.state &&
+                    lastCur?.detail === lastNext?.detail
+                  ) {
+                    return current;
+                  }
+                }
+                return next;
+              });
+            } catch {
+              // ignore transient transcript poll errors
+            }
+          }
+          pollTranscript();
+        })();
+      }, 350);
+    };
+    pollTranscript();
+    return () => {
+      closed = true;
+      window.clearTimeout(timer);
+    };
   }, [agent.orcaSessionId]);
 
   useEffect(() => {
@@ -4980,7 +5180,7 @@ function LogDrawer({
     const el = bodyRef.current;
     if (!el) return;
     const scrollToBottom = () => {
-      el.scrollTop = el.scrollHeight;
+      smoothScrollToBottom(el, { shouldContinue: () => followRef.current });
     };
     // The transcript arrives asynchronously after the terminal snapshot, so
     // scroll again after React has painted the new message/reasoning blocks.
@@ -5014,7 +5214,9 @@ function LogDrawer({
       frame = window.requestAnimationFrame(() => {
         frame = 0;
         const node = bodyRef.current;
-        if (node && followRef.current) node.scrollTop = node.scrollHeight;
+        if (node && followRef.current) {
+          smoothScrollToBottom(node, { shouldContinue: () => followRef.current });
+        }
       });
     };
     const resize = new ResizeObserver(stick);
@@ -5317,6 +5519,38 @@ function LogDrawer({
     }
   };
 
+  const sendCompact = async () => {
+    if (sending || isThinking) return;
+    const toId = agent.terminalHandle || agent.id;
+    if (!toId) {
+      setSendError('컴팩트할 세션을 찾지 못했어요.');
+      return;
+    }
+    setSending(true);
+    setSendError(null);
+    try {
+      if ((isFreebuff || isShell) && agent.terminalHandle) {
+        const result = await orcaApi.sendTerminal(agent.terminalHandle, '/compact', {
+          focus: isFreebuff,
+          waitSubmit: isFreebuff,
+        });
+        if (!result.ok) throw new Error(result.error || '컴팩트 명령을 전달하지 못했어요.');
+      } else {
+        const result = await orcaApi.sendMessage({ text: '/compact', toId });
+        if (result.ok === false || result.error) {
+          throw new Error(result.error || '컴팩트 명령을 전달하지 못했어요.');
+        }
+      }
+      setSent(true);
+      window.setTimeout(() => setSent(false), 1600);
+      void load();
+    } catch (cause) {
+      setSendError(cause instanceof Error ? cause.message : '컴팩트를 실행하지 못했어요.');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const sendReply = async (event?: FormEvent) => {
     event?.preventDefault();
     const outgoingText = reply.trim();
@@ -5329,8 +5563,30 @@ function LogDrawer({
       setSendError('메시지를 받을 세션을 찾지 못했어요.');
       return;
     }
+    const prevReply = reply;
+    const prevAttachment = attachment;
+    const optimisticId = `fb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     setSending(true);
     setSendError(null);
+    setReply('');
+    setAttachment(null);
+    setLastSent(text);
+    if (isFreebuff) {
+      setSentMessages((current) =>
+        [
+          ...current,
+          {
+            id: optimisticId,
+            text: outgoingText || (prevAttachment ? `첨부 파일: ${prevAttachment.name}` : text),
+            at: Date.now(),
+            afterBlock: displayBlocks.length,
+          },
+        ].slice(-FREEBUFF_SENT_LIMIT),
+      );
+    }
+    setView(isShell ? 'terminal' : 'chat');
+    followRef.current = true;
+    setFollow(true);
     try {
       // Freebuff's TUI input is the reliable path for an already-open parallel
       // worktree terminal. Orchestration is kept as a fallback for older hosts.
@@ -5346,33 +5602,19 @@ function LogDrawer({
           throw new Error(result.error || 'Freebuff 세션에 메시지를 전달하지 못했어요.');
         }
       }
-      setReply('');
-      setAttachment(null);
       setSent(true);
-      setLastSent(text);
-      if (isFreebuff) {
-        setSentMessages((current) =>
-          [
-            ...current,
-            {
-              id: `fb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-              text: outgoingText || (attachment ? `첨부 파일: ${attachment.name}` : text),
-              at: Date.now(),
-              afterBlock: displayBlocks.length,
-            },
-          ].slice(-FREEBUFF_SENT_LIMIT),
-        );
-      }
-      setView(isShell ? 'terminal' : 'chat');
-      followRef.current = true;
-      setFollow(true);
       window.setTimeout(() => setSent(false), 1600);
       const refresh = () => {
         void load();
       };
-      window.setTimeout(refresh, 700);
-      window.setTimeout(refresh, 2200);
+      window.setTimeout(refresh, 400);
+      window.setTimeout(refresh, 1500);
     } catch (cause) {
+      setReply(prevReply);
+      setAttachment(prevAttachment);
+      if (isFreebuff) {
+        setSentMessages((current) => current.filter((item) => item.id !== optimisticId));
+      }
       setSendError(cause instanceof Error ? cause.message : '메시지를 전달하지 못했어요.');
     } finally {
       setSending(false);
@@ -5941,8 +6183,8 @@ function LogDrawer({
                           <FreebuffThought
                             key={freebuffEntryKey(entry, index)}
                             entry={entry}
-                            live={isThinking && index === lastThinkingIndex}
-                            streaming={freebuffHot && index === lastThinkingIndex}
+                            live={isThinking && index === liveThinkingIndex}
+                            streaming={freebuffHot && index === liveThinkingIndex}
                           />
                         );
                       }
@@ -6174,11 +6416,24 @@ function LogDrawer({
               </div>
             )}
             {!freebuffPanel && (
-              <TodoBar
-                todos={fbTodos}
-                onToast={notify}
-                storageKey={`freebuff:${agent.path}`}
-              />
+              <>
+                <DeskRunChips
+                  runs={activeRuns}
+                  onDismiss={(id) =>
+                    setDismissedDeskRuns((prev) => {
+                      const next = new Set(prev);
+                      next.add(id);
+                      return next;
+                    })
+                  }
+                />
+                {baton && <BatonLine from={baton.from} to={baton.to} />}
+                <TodoBar
+                  todos={fbTodos}
+                  onToast={notify}
+                  storageKey={`freebuff:${agent.path}`}
+                />
+              </>
             )}
             <div
               className={`desk-freebuff-compose-shell ${freebuffPanel ? 'is-expanded' : ''} ${dragActive ? 'is-dragging' : ''}`}
@@ -6523,6 +6778,17 @@ function LogDrawer({
               </div>
               <button
                 type="button"
+                className={`tb-item compact ${sending ? 'is-busy' : ''}`}
+                onClick={() => void sendCompact()}
+                disabled={sending || isThinking || (!agent.terminalHandle && !agent.id)}
+                title="대화 컨텍스트 압축 (/compact)"
+                aria-label="컨텍스트 컴팩트"
+              >
+                {sending ? <Loader2 size={13} className="spin" /> : <Minimize2 size={13} />}
+                <span>컴팩트</span>
+              </button>
+              <button
+                type="button"
                 className={`tb-item timer ${isThinking ? 'busy' : 'idle'} ${freebuffPanel === 'usage' ? 'is-open' : ''} ${freebuffTimeLabel ? '' : 'time-error'}`}
                 onClick={() => toggleFreebuffPanel('usage')}
                 aria-label={freebuffTimeLabel ? `Freebuff 남은 시간 ${freebuffTimeLabel}` : 'Freebuff 남은 시간 확인 불가'}
@@ -6564,11 +6830,24 @@ function LogDrawer({
             onDrop={dropFile}
           >
             {!agyPickerOpen && !agyUsageOpen && (
-              <TodoBar
-                todos={agyTodos}
-                onToast={notify}
-                storageKey={`${agent.agent}:${agent.path}`}
-              />
+              <>
+                <DeskRunChips
+                  runs={activeRuns}
+                  onDismiss={(id) =>
+                    setDismissedDeskRuns((prev) => {
+                      const next = new Set(prev);
+                      next.add(id);
+                      return next;
+                    })
+                  }
+                />
+                {baton && <BatonLine from={baton.from} to={baton.to} />}
+                <TodoBar
+                  todos={agyTodos}
+                  onToast={notify}
+                  storageKey={`${agent.agent}:${agent.path}`}
+                />
+              </>
             )}
             <div className={`desk-freebuff-compose-shell ${(agyPickerOpen || agyUsageOpen) && (canPickModel || isAgyChat || isCodex || isClaude) ? 'is-expanded' : ''}`}>
             <div
@@ -6803,6 +7082,17 @@ function LogDrawer({
               </div>
               <button
                 type="button"
+                className={`tb-item compact ${sending ? 'is-busy' : ''}`}
+                onClick={() => void sendCompact()}
+                disabled={sending || isThinking || (!agent.terminalHandle && !agent.id)}
+                title="대화 컨텍스트 압축 (/compact)"
+                aria-label="컨텍스트 컴팩트"
+              >
+                {sending ? <Loader2 size={13} className="spin" /> : <Minimize2 size={13} />}
+                <span>컴팩트</span>
+              </button>
+              <button
+                type="button"
                 className={`tb-item timer ${agyUsageOpen ? 'is-open' : ''}`}
                 onClick={() => {
                   if (!isAgyChat && !isCodex && !isClaude) return;
@@ -6924,7 +7214,10 @@ function LogDrawer({
             overview={overview}
             brief={handoffBrief}
             onClose={() => setHandoffOpen(false)}
-            onSent={notify}
+            onSent={(message, target) => {
+              notify(message);
+              if (target) setBaton({ from: agent.title, to: target.title });
+            }}
           />
         )}
       </aside>

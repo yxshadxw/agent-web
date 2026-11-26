@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import anime from 'animejs';
 import { diffLines } from 'diff';
-import type { File as AgentFile, FileDiff } from '@opencode-ai/sdk';
+import type { File as AgentFile, FileDiff, ToolPart } from '@opencode-ai/sdk';
 import {
   Bot,
   Check,
@@ -12,13 +12,21 @@ import {
   FileCode2,
   FileJson2,
   FileText,
+  Folder,
   FolderGit2,
+  FolderOpen,
   GitBranch,
+  GitCompareArrows,
   HardDrive,
+  Maximize2,
+  Minimize2,
   Pin,
+  Radio,
   Sparkles,
   X,
 } from 'lucide-react';
+import { highlightCodeLines } from '../lib/markdown';
+import { smoothScrollToBottom, cancelSmoothScroll } from '../lib/smoothScroll';
 import type {
   AgentSession,
   AgyQuota,
@@ -78,6 +86,7 @@ type Props = {
   onTogglePin: (file: PinnedFile) => void;
   onOpenSession: (id: string) => void;
   onToast: (message: string) => void;
+  liveFiles?: LiveFileEntry[];
 };
 
 export function InfoPanel({
@@ -109,6 +118,7 @@ export function InfoPanel({
   onTogglePin,
   onOpenSession,
   onToast,
+  liveFiles,
 }: Props) {
   const [mounted, setMounted] = useState(open);
   const [focusFile, setFocusFile] = useState<string | null>(null);
@@ -251,9 +261,12 @@ export function InfoPanel({
           {tab === 'files' && (
             <FilesTabContent
               diffs={diffs}
+              gitFiles={gitFiles}
+              messages={messages}
+              liveFiles={liveFiles}
               pinned={pinned}
               onTogglePin={onTogglePin}
-              onOpen={(path) => {
+              onOpenDiff={(path) => {
                 setFocusFile(path);
                 onTab('diff');
               }}
@@ -598,67 +611,467 @@ function fileIcon(path: string) {
   return <FileCode2 size={17} />;
 }
 
+export type LiveFileEntry = {
+  path: string;
+  name: string;
+  status: 'writing' | 'saved';
+  additions: number;
+  deletions: number;
+  before: string;
+  after: string;
+};
+
+const FILE_TOOL_RE = /^(write|edit|multiedit|write_to_file|replace_file_content|multi_replace_file_content)$/i;
+
+function extractLiveFileEntries(
+  diffs: FileDiff[],
+  messages: MessageWithParts[],
+  gitFiles: AgentFile[] = [],
+  liveFiles: LiveFileEntry[] = [],
+): LiveFileEntry[] {
+  const byPath = new Map<string, LiveFileEntry>();
+
+  for (const lf of liveFiles) {
+    byPath.set(lf.path, { ...lf });
+  }
+
+  for (const diff of diffs) {
+    const existing = byPath.get(diff.file);
+    if (existing && existing.status === 'writing') {
+      if (!existing.before && diff.before) existing.before = diff.before;
+      continue;
+    }
+    byPath.set(diff.file, {
+      path: diff.file,
+      name: diff.file.split('/').pop() || diff.file,
+      status: 'saved',
+      additions: diff.additions,
+      deletions: diff.deletions,
+      before: diff.before,
+      after: diff.after,
+    });
+  }
+
+  for (const gf of gitFiles) {
+    if (!byPath.has(gf.path)) {
+      byPath.set(gf.path, {
+        path: gf.path,
+        name: gf.path.split('/').pop() || gf.path,
+        status: 'saved',
+        additions: gf.added ?? 0,
+        deletions: gf.removed ?? 0,
+        before: '',
+        after: '',
+      });
+    }
+  }
+
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== 'tool') continue;
+      const toolPart = part as ToolPart;
+      if (!FILE_TOOL_RE.test(toolPart.tool)) continue;
+      const input = (toolPart.state.input || {}) as Record<string, unknown>;
+      const rawPath =
+        (typeof input.filePath === 'string' && input.filePath) ||
+        (typeof input.path === 'string' && input.path) ||
+        (typeof input.TargetFile === 'string' && input.TargetFile) ||
+        (typeof input.file === 'string' && input.file) ||
+        '';
+      if (!rawPath) continue;
+
+      const isRunning = toolPart.state.status === 'running' || toolPart.state.status === 'pending';
+      const liveText =
+        (typeof input.content === 'string' && input.content) ||
+        (typeof input.CodeContent === 'string' && input.CodeContent) ||
+        (typeof input.newString === 'string' && input.newString) ||
+        (typeof input.ReplacementContent === 'string' && input.ReplacementContent) ||
+        '';
+
+      const existing = byPath.get(rawPath);
+      if (existing) {
+        if (isRunning) {
+          existing.status = 'writing';
+          if (liveText && liveText.length >= existing.after.length) {
+            existing.after = liveText;
+            existing.additions = Math.max(existing.additions, liveText.split('\n').length);
+          }
+        }
+      } else if (liveText || isRunning) {
+        const lineCount = liveText ? liveText.split('\n').length : 0;
+        byPath.set(rawPath, {
+          path: rawPath,
+          name: rawPath.split('/').pop() || rawPath,
+          status: isRunning ? 'writing' : 'saved',
+          additions: lineCount,
+          deletions: 0,
+          before: '',
+          after: liveText,
+        });
+      }
+    }
+  }
+
+  return [...byPath.values()];
+}
+
+function fileBadgeExt(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'ts' || ext === 'tsx') return 'TS';
+  if (ext === 'js' || ext === 'jsx') return 'JS';
+  if (ext === 'svelte' || ext === 'html' || ext === 'xml') return '<>';
+  if (ext === 'css' || ext === 'scss') return '#';
+  if (ext === 'json') return '{}';
+  if (ext === 'db' || ext === 'sql') return 'DB';
+  if (ext === 'md') return 'MD';
+  return ext.slice(0, 3).toUpperCase() || 'FILE';
+}
+
+type FileTreeNode = {
+  key: string;
+  name: string;
+  folders: FileTreeNode[];
+  files: LiveFileEntry[];
+};
+
+function buildFileTree(entries: LiveFileEntry[]): FileTreeNode {
+  const root: FileTreeNode = { key: '', name: '', folders: [], files: [] };
+  const folderMap = new Map<string, FileTreeNode>([['', root]]);
+
+  for (const entry of entries) {
+    const parts = entry.path.split('/').filter(Boolean);
+    const dirs = parts.slice(0, -1);
+    let parentKey = '';
+    for (const dir of dirs) {
+      const nextKey = parentKey ? `${parentKey}/${dir}` : dir;
+      if (!folderMap.has(nextKey)) {
+        const node: FileTreeNode = { key: nextKey, name: dir, folders: [], files: [] };
+        folderMap.set(nextKey, node);
+        folderMap.get(parentKey)!.folders.push(node);
+      }
+      parentKey = nextKey;
+    }
+    folderMap.get(parentKey)!.files.push(entry);
+  }
+  return root;
+}
+
 function FilesTabContent({
   diffs,
+  gitFiles,
+  messages,
+  liveFiles,
   pinned,
   onTogglePin,
-  onOpen,
+  onOpenDiff,
 }: {
   diffs: FileDiff[];
+  gitFiles: AgentFile[];
+  messages: MessageWithParts[];
+  liveFiles?: LiveFileEntry[];
   pinned: PinnedFile[];
   onTogglePin: (file: PinnedFile) => void;
-  onOpen: (path: string) => void;
+  onOpenDiff: (path: string) => void;
 }) {
-  const additions = diffs.reduce((sum, diff) => sum + diff.additions, 0);
-  const deletions = diffs.reduce((sum, diff) => sum + diff.deletions, 0);
+  const entries = useMemo(
+    () => extractLiveFileEntries(diffs, messages, gitFiles, liveFiles),
+    [diffs, messages, gitFiles, liveFiles],
+  );
+  const tree = useMemo(() => buildFileTree(entries), [entries]);
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(() => new Set());
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [viewerOpen, setViewerOpen] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [follow, setFollow] = useState(true);
+  const codeBodyRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(follow);
+  followRef.current = follow;
 
-  if (diffs.length === 0) {
+  const toggleDir = (dirKey: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirKey)) next.delete(dirKey);
+      else next.add(dirKey);
+      return next;
+    });
+  };
+
+  // Keep open tabs synced with modified/writing files and auto-focus active writes.
+  useEffect(() => {
+    if (entries.length === 0) return;
+    setOpenTabs((prev) => {
+      const next = [...prev];
+      for (const entry of entries) {
+        if (!next.includes(entry.path)) next.push(entry.path);
+      }
+      return next.slice(-8);
+    });
+    const writing = entries.find((e) => e.status === 'writing');
+    if (writing) {
+      setSelectedPath(writing.path);
+      setViewerOpen(true);
+    } else if (!selectedPath || !entries.some((e) => e.path === selectedPath)) {
+      setSelectedPath(entries[0].path);
+    }
+  }, [entries, selectedPath]);
+
+  const activeEntry = useMemo(
+    () => entries.find((e) => e.path === selectedPath) ?? entries[0] ?? null,
+    [entries, selectedPath],
+  );
+
+  const { lines, addedLines } = useMemo(() => {
+    if (!activeEntry) return { lines: [] as string[], addedLines: new Set<number>() };
+    const code = activeEntry.after || '';
+    const highlighted = highlightCodeLines(code, activeEntry.path);
+    const added = new Set<number>();
+    if (activeEntry.before) {
+      const changes = diffLines(activeEntry.before, code);
+      let lineNo = 1;
+      for (const change of changes) {
+        const count = change.value.split('\n').length - (change.value.endsWith('\n') ? 1 : 0);
+        if (change.added) {
+          for (let i = 0; i < count; i += 1) added.add(lineNo + i);
+        }
+        if (!change.removed) lineNo += count;
+      }
+    } else if (code) {
+      for (let i = 1; i <= highlighted.length; i += 1) added.add(i);
+    }
+    return { lines: highlighted, addedLines: added };
+  }, [activeEntry]);
+
+  // Smoothly follow newly modified/added lines while "따라가며" is enabled.
+  useEffect(() => {
+    if (!follow || !viewerOpen || !activeEntry) return;
+    const el = codeBodyRef.current;
+    if (!el) return;
+    const addedNodes = el.querySelectorAll<HTMLElement>('.live-code-line.is-added');
+    const lastAdded = addedNodes.length > 0 ? addedNodes[addedNodes.length - 1] : null;
+    if (lastAdded && addedNodes.length < lines.length) {
+      lastAdded.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else {
+      smoothScrollToBottom(el, { shouldContinue: () => followRef.current });
+    }
+  }, [follow, viewerOpen, activeEntry?.path, activeEntry?.after.length, lines.length]);
+
+  const additions = entries.reduce((sum, item) => sum + item.additions, 0);
+  const deletions = entries.reduce((sum, item) => sum + item.deletions, 0);
+
+  if (entries.length === 0) {
     return <EmptyTab icon={<FileCode2 size={26} />} text="이 세션에서 수정된 파일이 아직 없어요." />;
   }
 
+  const selectFile = (path: string) => {
+    setSelectedPath(path);
+    setViewerOpen(true);
+    setOpenTabs((prev) => (prev.includes(path) ? prev : [...prev, path].slice(-8)));
+  };
+
+  const closeTab = (path: string) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((p) => p !== path);
+      if (selectedPath === path) {
+        const fallback = next[next.length - 1] ?? null;
+        setSelectedPath(fallback);
+        if (!fallback) setViewerOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const renderTree = (node: FileTreeNode, depth = 0): ReactNode => (
+    <>
+      {node.folders.map((folder) => {
+        const isOpen = !collapsedDirs.has(folder.key);
+        return (
+          <div className="file-tree-branch" key={folder.key}>
+            <button
+              type="button"
+              className="file-tree-dir"
+              style={{ paddingLeft: `${8 + depth * 14}px` }}
+              onClick={() => toggleDir(folder.key)}
+              aria-expanded={isOpen}
+            >
+              <ChevronRight size={13} className={`file-tree-chev ${isOpen ? 'open' : ''}`} />
+              {isOpen ? <FolderOpen size={14} className="file-tree-folder-ico" /> : <Folder size={14} className="file-tree-folder-ico" />}
+              <span>{folder.name}</span>
+            </button>
+            {isOpen && renderTree(folder, depth + 1)}
+          </div>
+        );
+      })}
+      {node.files.map((entry) => {
+        const isPinned = pinned.some((pin) => pin.path === entry.path);
+        const isSelected = activeEntry?.path === entry.path && viewerOpen;
+        return (
+          <div
+            className={`file-row file-tree-row ${isSelected ? 'is-selected' : ''}`}
+            key={entry.path}
+            style={{ paddingLeft: `${depth * 14}px` }}
+          >
+            <button className="file-open" onClick={() => selectFile(entry.path)}>
+              <span className="file-ico type-tsx">{fileIcon(entry.path)}</span>
+              <span className="file-main">
+                <span className="file-name">{entry.name}</span>
+              </span>
+              <span className={`file-status-pill ${entry.status}`}>
+                {entry.status === 'writing' ? '작성 중' : '저장됨'}
+              </span>
+            </button>
+            <button
+              className={`file-pin ${isPinned ? 'active' : ''}`}
+              onClick={() =>
+                onTogglePin({
+                  path: entry.path,
+                  at: Date.now(),
+                  additions: entry.additions,
+                  deletions: entry.deletions,
+                })
+              }
+              aria-label={isPinned ? '핀 해제' : '파일 핀'}
+            >
+              <Pin size={14} />
+            </button>
+          </div>
+        );
+      })}
+    </>
+  );
+
   return (
-    <div className="tab-stack">
-      <div className="tab-summary anim-row">
-        <span className="tab-summary-title">변경된 파일</span>
-        <span className="tab-summary-meta">
-          {diffs.length}개 · <em className="add">+{additions}</em>{' '}
-          <em className="del">−{deletions}</em>
-        </span>
-      </div>
-      <div className="file-list">
-        {diffs.map((diff) => {
-          const isPinned = pinned.some((pin) => pin.path === diff.file);
-          return (
-            <div className="file-row anim-row" key={diff.file}>
-              <button className="file-open" onClick={() => onOpen(diff.file)}>
-                <span className="file-ico type-tsx">{fileIcon(diff.file)}</span>
-                <span className="file-main">
-                  <span className="file-name">{diff.file.split('/').pop()}</span>
-                  <span className="file-meta">{diff.file}</span>
-                </span>
-                <span className="file-size">
-                  <em className="add">+{diff.additions}</em>{' '}
-                  <em className="del">−{diff.deletions}</em>
-                </span>
+    <div className={`files-workspace ${expanded ? 'is-expanded' : ''}`}>
+      {!expanded && (
+        <div className="files-tree-pane">
+          <div className="tab-summary anim-row">
+            <span className="tab-summary-title">파일 탐색기</span>
+            <span className="tab-summary-meta">
+              {entries.length}개 · <em className="add">+{additions}</em>{' '}
+              <em className="del">−{deletions}</em>
+            </span>
+          </div>
+          <div className="file-list file-tree-list">{renderTree(tree)}</div>
+        </div>
+      )}
+
+      {viewerOpen && activeEntry && (
+        <section className="live-viewer" aria-label="라이브 코드 뷰어">
+          <div className="live-viewer-head">
+            <span className={`live-dot ${activeEntry.status}`} />
+            <span className="live-viewer-name" title={activeEntry.path}>
+              {activeEntry.name}
+            </span>
+            <span className="live-viewer-stat">
+              {activeEntry.status === 'writing' ? '작성 중' : '저장됨'} · +{activeEntry.additions}
+            </span>
+            <div className="live-viewer-actions">
+              <button
+                type="button"
+                className={`live-follow-btn ${follow ? 'active' : ''}`}
+                onClick={() => setFollow((v) => !v)}
+                title="새로 작성되는 줄을 자동으로 따라갑니다"
+              >
+                <Radio size={12} />
+                <span>따라가며</span>
               </button>
               <button
-                className={`file-pin ${isPinned ? 'active' : ''}`}
-                onClick={() =>
-                  onTogglePin({
-                    path: diff.file,
-                    at: Date.now(),
-                    additions: diff.additions,
-                    deletions: diff.deletions,
-                  })
-                }
-                aria-label={isPinned ? '핀 해제' : '파일 핀'}
+                type="button"
+                className="live-icon-btn"
+                onClick={() => onOpenDiff(activeEntry.path)}
+                title="Diff 탭에서 보기"
+                aria-label="Diff 탭에서 보기"
               >
-                <Pin size={14} />
+                <GitCompareArrows size={13} />
+              </button>
+              <button
+                type="button"
+                className="live-icon-btn"
+                onClick={() => setExpanded((v) => !v)}
+                title={expanded ? '분할 보기로 돌아가기' : '뷰어 확대'}
+                aria-label={expanded ? '분할 보기로 돌아가기' : '뷰어 확대'}
+              >
+                {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
+              <button
+                type="button"
+                className="live-icon-btn"
+                onClick={() => {
+                  setExpanded(false);
+                  setViewerOpen(false);
+                }}
+                title="뷰어 닫기"
+                aria-label="뷰어 닫기"
+              >
+                <X size={13} />
               </button>
             </div>
-          );
-        })}
-      </div>
+          </div>
+
+          <div
+            className="live-viewer-body"
+            ref={codeBodyRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+              if (!atBottom && followRef.current) {
+                setFollow(false);
+                cancelSmoothScroll(el);
+              }
+            }}
+          >
+            {lines.length === 0 ? (
+              <div className="live-viewer-empty">내용을 불러오는 중…</div>
+            ) : (
+              <div className="live-code">
+                {lines.map((lineHtml, idx) => {
+                  const no = idx + 1;
+                  const isAdded = addedLines.has(no);
+                  return (
+                    <div className={`live-code-line ${isAdded ? 'is-added' : ''}`} key={no}>
+                      <span className="live-code-n">{no}</span>
+                      <code
+                        className="hljs"
+                        dangerouslySetInnerHTML={{ __html: lineHtml || '&nbsp;' }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {openTabs.length > 0 && (
+        <div className="file-tabs-dock" role="tablist" aria-label="열린 파일">
+          {openTabs.map((path) => {
+            const name = path.split('/').pop() || path;
+            const active = activeEntry?.path === path && viewerOpen;
+            return (
+              <div className={`file-tab-pill ${active ? 'active' : ''}`} key={path}>
+                <button
+                  type="button"
+                  className="file-tab-btn"
+                  onClick={() => selectFile(path)}
+                  title={path}
+                >
+                  <span className="file-tab-badge">{fileBadgeExt(path)}</span>
+                  <span className="file-tab-name">{name}</span>
+                </button>
+                <button
+                  type="button"
+                  className="file-tab-close"
+                  onClick={() => closeTab(path)}
+                  aria-label={`${name} 닫기`}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

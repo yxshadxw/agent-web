@@ -5,11 +5,13 @@ import { AmbientBackdrop } from './components/AmbientBackdrop';
 import { Header } from './components/Header';
 import { Timeline } from './components/Timeline';
 import { Composer, type Attachment } from './components/Composer';
+import type { BackgroundRunItem } from './components/BackgroundRunChips';
 import { AutoList, ContextSheet, ModelList, ReasonList, UsageSheet, type UnifiedModelGroup } from './components/Sheets';
 import type { TeamTreeAgent } from './components/InfoPanel';
 import { deriveTodosFromTools } from './components/TodoBar';
 import type { CodexPanelState } from './components/CodexPanel';
 import { Sidebar } from './components/Sidebar';
+import { AndroidModal } from './components/AndroidModal';
 
 const InfoPanel = lazy(() =>
   import('./components/InfoPanel').then((m) => ({ default: m.InfoPanel })),
@@ -27,6 +29,7 @@ import { BrandGlyph } from './components/Brand';
 import { useAgent } from './hooks/useAgent';
 import { useAgyQuota } from './hooks/useQuota';
 import { engineLabel, getEngine, switchEngine } from './lib/engine';
+import { smoothScrollToBottom, cancelSmoothScroll } from './lib/smoothScroll';
 import { orcaApi, type WorktreeDiffPayload } from './lib/orca';
 import { useAppSettings } from './lib/preferences';
 import {
@@ -104,12 +107,58 @@ export default function App() {
   const [infoTab, setInfoTab] = useState<InfoTab>('info');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [androidOpen, setAndroidOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [pins, setPins] = useState<PinnedFile[]>([]);
   const [compressing, setCompressing] = useState(false);
   const [tick, setTick] = useState(0);
   const [otherProviders, setOtherProviders] = useState<AgentProvider[]>([]);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [dismissedRuns, setDismissedRuns] = useState<Set<string>>(() => new Set());
+
+  const chatRuns = useMemo<BackgroundRunItem[]>(() => {
+    const items: BackgroundRunItem[] = [];
+    const lastUserIdx = agent.messages.reduce(
+      (last, m, idx) => (m.info.role === 'user' ? idx : last),
+      -1,
+    );
+    const turnMsgs = lastUserIdx >= 0 ? agent.messages.slice(lastUserIdx + 1) : agent.messages;
+    for (const msg of turnMsgs) {
+      for (const part of msg.parts) {
+        if (part.type !== 'tool') continue;
+        if (!/bash|shell|exec|bg_run|task|agent|subagent|command/i.test(part.tool)) continue;
+        if (dismissedRuns.has(part.id)) continue;
+        const st = part.state.status;
+        const inp = (part.state.input || {}) as Record<string, unknown>;
+        const label =
+          (typeof inp.description === 'string' && inp.description) ||
+          (typeof inp.command === 'string' && inp.command.split('\n')[0]) ||
+          (typeof inp.CommandLine === 'string' && inp.CommandLine.split('\n')[0]) ||
+          part.tool;
+        const status: BackgroundRunItem['status'] =
+          st === 'running' || st === 'pending'
+            ? 'running'
+            : st === 'error'
+              ? 'stopped'
+              : 'done';
+        const output =
+          st === 'completed'
+            ? part.state.output
+            : st === 'error'
+              ? part.state.error
+              : undefined;
+        items.push({
+          id: part.id,
+          label: label.slice(0, 36),
+          detail: typeof inp.command === 'string' ? inp.command : typeof inp.CommandLine === 'string' ? inp.CommandLine : undefined,
+          output: output ? output.slice(0, 4000) : undefined,
+          status,
+        });
+      }
+    }
+    return items.slice(-4);
+  }, [agent.messages, dismissedRuns]);
 
   useEffect(() => {
     if (agent.auth !== 'ok' || codexMode) return;
@@ -188,6 +237,26 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2000);
   }, []);
 
+  const refreshModels = useCallback(async () => {
+    if (refreshingModels) return;
+    setRefreshingModels(true);
+    try {
+      const otherUrl = engine === 'agy' ? '/api/config/providers?refresh=1' : '/agy-api/config/providers?refresh=1';
+      const [, otherData] = await Promise.all([
+        agent.refreshProviders().catch(() => null),
+        fetch(otherUrl, { credentials: 'include' })
+          .then((res) => (res.ok ? res.json() : null))
+          .catch(() => null),
+      ]);
+      if (Array.isArray(otherData?.providers)) {
+        setOtherProviders(otherData.providers);
+      }
+      showToast('모델 목록을 새로고침했어요');
+    } finally {
+      setRefreshingModels(false);
+    }
+  }, [agent, engine, refreshingModels, showToast]);
+
   useEffect(() => {
     setPins(loadPins(pinScope));
   }, [pinScope]);
@@ -218,7 +287,7 @@ export default function App() {
         setTeamAgents(agentsList);
       })
       .catch(() => undefined);
-    if (codexScreen && workDir) {
+    if (workDir) {
       void orcaApi
         .worktreeDiff(workDir)
         .then((res) => {
@@ -289,7 +358,7 @@ export default function App() {
     const el = scrollerRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
+      smoothScrollToBottom(el, { instant: true });
     });
   }, [agent.sessionID]);
 
@@ -316,9 +385,7 @@ export default function App() {
     if (!stick.current) return;
     const el = scrollerRef.current;
     if (!el) return;
-    requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
+    smoothScrollToBottom(el, { shouldContinue: () => stick.current });
   }, [signature, agent.busy, agent.permissions.length, agent.error]);
 
   const session = agent.session;
@@ -660,6 +727,7 @@ export default function App() {
   if (agent.auth === 'checking') {
     return (
       <div className="stage">
+        <AmbientBackdrop className="is-login" />
         <div className="phone login-phone">
           <div className="login-screen">
             <div className="login-mark">
@@ -684,6 +752,7 @@ export default function App() {
   if (agent.auth === 'error') {
     return (
       <div className="stage">
+        <AmbientBackdrop className="is-login" />
         <div className="phone login-phone">
           <div className="login-screen">
             <div className="login-mark">
@@ -718,6 +787,7 @@ export default function App() {
       <Suspense
         fallback={
           <div className="stage">
+            <AmbientBackdrop className="is-login" />
             <div className="phone login-phone">
               <div className="login-screen">
                 <div className="login-loading">
@@ -751,6 +821,8 @@ export default function App() {
         modelID={agent.model.modelID}
         currentEngine={engine}
         groups={unifiedModelGroups}
+        onRefresh={() => void refreshModels()}
+        refreshing={refreshingModels}
         onPick={(providerID, modelID, targetEngine) => {
           if (targetEngine && targetEngine !== engine) {
             setPanel(null);
@@ -828,6 +900,9 @@ export default function App() {
           onNewSession={() => void newSession()}
           onSettings={openSettings}
           onOpenDesk={openDesk}
+          onOpenAndroid={() => setAndroidOpen(true)}
+          onCompact={!codexScreen ? () => void compressContext() : undefined}
+          compacting={compressing}
           onOpenCodex={() => {
             if (codexMode) {
               switchEngine('agy');
@@ -867,7 +942,9 @@ export default function App() {
           ref={scrollerRef}
           onScroll={(event) => {
             const el = event.currentTarget;
-            stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+            stick.current = atBottom;
+            if (!atBottom) cancelSmoothScroll(el);
           }}
         >
           <Timeline
@@ -920,6 +997,17 @@ export default function App() {
           showContextRing={prefs.contextRing}
           remainingPct={remainingPct}
           remainingLabel={remainingLabel}
+          onCompact={() => void compressContext()}
+          compacting={compressing}
+          compactDisabled={!agent.sessionID || agent.busy || compressing}
+          runs={chatRuns}
+          onDismissRun={(id) =>
+            setDismissedRuns((prev) => {
+              const next = new Set(prev);
+              next.add(id);
+              return next;
+            })
+          }
         />
         )}
       </div>
@@ -949,9 +1037,21 @@ export default function App() {
             }
             parentSession={codexScreen ? null : parentSession}
             messages={codexScreen ? [] : agent.messages}
-            diffs={codexScreen && worktreeDiff ? worktreeDiff.diffs : agent.diffs}
+            diffs={
+              codexScreen && worktreeDiff
+                ? worktreeDiff.diffs
+                : agent.diffs.length > 0
+                  ? agent.diffs
+                  : worktreeDiff?.diffs || []
+            }
             children={codexScreen ? [] : agent.children}
-            gitFiles={codexScreen && worktreeDiff ? worktreeDiff.files : agent.gitFiles}
+            gitFiles={
+              codexScreen && worktreeDiff
+                ? worktreeDiff.files
+                : agent.gitFiles.length > 0
+                  ? agent.gitFiles
+                  : worktreeDiff?.files || []
+            }
             vcs={
               codexScreen && worktreeDiff?.branch
                 ? { branch: worktreeDiff.branch, default_branch: agent.vcs?.default_branch }
@@ -1033,6 +1133,8 @@ export default function App() {
           {toast}
         </div>
       )}
+
+      <AndroidModal open={androidOpen} onClose={() => setAndroidOpen(false)} />
     </div>
   );
 }

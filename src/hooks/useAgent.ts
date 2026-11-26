@@ -245,6 +245,10 @@ export function useAgent() {
   const bootstrap = useCallback(async () => {
     setAuthState('checking');
     try {
+      const stored = localStorage.getItem(LAST_SESSION_KEY);
+      const earlySessionLoad = stored ? loadSession(stored).catch(() => undefined) : null;
+      if (stored) setSessionID(stored);
+
       const [nextSessions, nextProviders, nextAgents, nextStatuses, nextPath] =
         await Promise.all([
           api.sessions(),
@@ -270,11 +274,14 @@ export function useAgent() {
       setAuthState('ok');
       void refreshGit();
 
-      const stored = localStorage.getItem(LAST_SESSION_KEY);
       if (stored && nextSessions.some((session) => session.id === stored)) {
-        void selectSession(stored);
+        await earlySessionLoad;
       } else {
         setSessionID(null);
+        setMessages([]);
+        setTodos([]);
+        setDiffs([]);
+        setChildren([]);
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -284,7 +291,7 @@ export function useAgent() {
         setError(errorText(err) || '에이전트 서버에 연결할 수 없어요');
       }
     }
-  }, [refreshGit, selectSession, setSessionID]);
+  }, [loadSession, refreshGit, setSessionID]);
 
   useEffect(() => {
     setUnauthorizedHandler(() => setAuthState('required'));
@@ -342,7 +349,11 @@ export function useAgent() {
               const pending = orphanParts.current[info.id];
               const parts = pending ? Object.values(pending) : [];
               delete orphanParts.current[info.id];
-              return [...current, { info, parts }];
+              const filtered =
+                info.role === 'user'
+                  ? current.filter((m) => !m.info.id.startsWith('optimistic-'))
+                  : current;
+              return [...filtered, { info, parts }];
             }
             return current.map((message, i) =>
               i === index ? { info, parts: message.parts } : message,
@@ -530,7 +541,32 @@ export function useAgent() {
       setError(null);
       setSending(true);
 
+      const optimisticId = `optimistic-${Date.now()}`;
       let id = sessionRef.current;
+      const optimisticParts: Part[] = trimmed
+        ? [
+            {
+              id: `${optimisticId}-p0`,
+              sessionID: id || 'pending',
+              messageID: optimisticId,
+              type: 'text',
+              text: trimmed,
+            } as Part,
+          ]
+        : [];
+      setMessages((current) => [
+        ...current,
+        {
+          info: {
+            id: optimisticId,
+            sessionID: id || 'pending',
+            role: 'user',
+            time: { created: Date.now() },
+          } as Message,
+          parts: optimisticParts,
+        },
+      ]);
+
       try {
         if (!id) {
           const created = await api.createSession(
@@ -555,6 +591,7 @@ export function useAgent() {
           parts,
         });
       } catch (err) {
+        setMessages((current) => current.filter((m) => m.info.id !== optimisticId));
         setSending(false);
         setError(errorText(err));
       }
@@ -576,26 +613,34 @@ export function useAgent() {
 
   useEffect(() => {
     // Catch permission requests missed by the event stream (e.g. emitted while
-    // the page was backgrounded) so a tool never waits forever.
+    // the page was backgrounded) without piling up overlapping requests.
+    let inFlight = false;
     const timer = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      void api.pendingPermissions().then((list) => {
-        for (const raw of list) {
-          if (sessionRef.current && raw.sessionID !== sessionRef.current) continue;
-          if (autoApproveRef.current) {
-            void api.replyPermission(raw.sessionID, raw.id, 'once').catch(() => undefined);
-          } else {
-            const permission = {
-              ...raw,
-              title: raw.title || `${raw.permission} ${(raw.patterns || []).join(', ')}`.trim(),
-            } as PermissionRequest;
-            setPermissions((current) =>
-              current.some((item) => item.id === permission.id) ? current : [...current, permission],
-            );
+      if (document.visibilityState !== 'visible' || inFlight) return;
+      inFlight = true;
+      void api
+        .pendingPermissions()
+        .then((list) => {
+          for (const raw of list) {
+            if (sessionRef.current && raw.sessionID !== sessionRef.current) continue;
+            if (autoApproveRef.current) {
+              void api.replyPermission(raw.sessionID, raw.id, 'once').catch(() => undefined);
+            } else {
+              const permission = {
+                ...raw,
+                title: raw.title || `${raw.permission} ${(raw.patterns || []).join(', ')}`.trim(),
+              } as PermissionRequest;
+              setPermissions((current) =>
+                current.some((item) => item.id === permission.id) ? current : [...current, permission],
+              );
+            }
           }
-        }
-      });
-    }, 2500);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+        });
+    }, 800);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -655,6 +700,13 @@ export function useAgent() {
     [model, setModel],
   );
 
+  const refreshProviders = useCallback(async () => {
+    const nextProviders = await api.providers(true);
+    setProviders(nextProviders);
+    providersRef.current = nextProviders;
+    return nextProviders;
+  }, []);
+
   const selectedSession = sessions.find((item) => item.id === sessionID) ?? null;
   const status = sessionID ? statuses[sessionID] : undefined;
   const busy = sending || status?.type === 'busy' || status?.type === 'retry';
@@ -703,6 +755,7 @@ export function useAgent() {
     setAutoApprove,
     refreshDiff,
     refreshGit,
+    refreshProviders,
     clearError: () => setError(null),
   };
 }

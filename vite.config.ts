@@ -110,7 +110,7 @@ function accessGuard(): Plugin {
   };
 
   const attach = (middlewares: { use: (route: string, fn: typeof handle) => void }) => {
-    for (const prefix of ['/api', '/agy-api', '/orca-api', '/codex-api']) {
+    for (const prefix of ['/api', '/agy-api', '/orca-api', '/codex-api', '/android-vnc']) {
       middlewares.use(prefix, (req, res, next) => {
         void handle(req, res, next);
       });
@@ -173,6 +173,12 @@ const proxy = {
     target: API_TARGET,
     changeOrigin: true,
     rewrite: (path: string) => path.replace(/^\/api/, ''),
+  },
+  '/android-vnc': {
+    target: 'http://127.0.0.1:6080',
+    changeOrigin: true,
+    ws: true,
+    rewrite: (path: string) => path.replace(/^\/android-vnc/, ''),
   },
 };
 

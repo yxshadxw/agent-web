@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ChevronDown,
   Loader2,
+  Minimize2,
   Plus,
   ShieldCheck,
   ShieldQuestion,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { fmtClock, type ComposerPanel } from '../data';
 import { TodoBar } from './TodoBar';
+import { BackgroundRunChips, type BackgroundRunItem } from './BackgroundRunChips';
 
 export type Attachment = {
   mime: string;
@@ -41,6 +43,11 @@ type Props = {
   showContextRing: boolean;
   remainingPct: number;
   remainingLabel?: string | null;
+  onCompact?: () => void;
+  compacting?: boolean;
+  compactDisabled?: boolean;
+  runs?: BackgroundRunItem[];
+  onDismissRun?: (id: string) => void;
 };
 
 const MAX_FILES = 4;
@@ -67,6 +74,11 @@ export function Composer({
   showContextRing,
   remainingPct,
   remainingLabel,
+  onCompact,
+  compacting,
+  compactDisabled,
+  runs,
+  onDismissRun,
 }: Props) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -122,10 +134,6 @@ export function Composer({
       document.removeEventListener('pointerdown', onDown);
     };
   }, [panel, onPanel]);
-
-      {!panel && (
-        <TodoBar todos={todos} onToast={onToast} storageKey={todoStorageKey} />
-      )}
 
   const addFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -200,6 +208,10 @@ export function Composer({
         addFiles(event.dataTransfer.files);
       }}
     >
+      {!panel && runs && runs.length > 0 && (
+        <BackgroundRunChips runs={runs} onDismiss={onDismissRun} />
+      )}
+
       {!panel && (
         <TodoBar todos={todos} onToast={onToast} storageKey={todoStorageKey} />
       )}
@@ -318,6 +330,20 @@ export function Composer({
             </button>
           )}
         </div>
+
+        {onCompact && (
+          <button
+            type="button"
+            className={`tb-item compact ${compacting ? 'is-busy' : ''}`}
+            onClick={onCompact}
+            disabled={compactDisabled || compacting}
+            title="대화 컨텍스트 압축 (컴팩트)"
+            aria-label="컨텍스트 컴팩트"
+          >
+            {compacting ? <Loader2 size={13} className="spin" /> : <Minimize2 size={13} />}
+            <span>{compacting ? '압축 중' : '컴팩트'}</span>
+          </button>
+        )}
 
         <button
           className={`tb-item timer ${busy ? 'busy' : 'idle'} ${panel === 'usage' ? 'is-open' : ''}`}

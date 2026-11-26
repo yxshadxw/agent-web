@@ -16,6 +16,36 @@ type ManualTodo = {
 
 const MANUAL_TODO_PREFIX = 'agent-web:manual-todos:v1:';
 
+function pulseRing(el: HTMLElement, color: string, spread = 12, ms = 700, strength = 0.6) {
+  const rect = el.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const ring = document.createElement('span');
+  ring.setAttribute('aria-hidden', 'true');
+  Object.assign(ring.style, {
+    position: 'fixed',
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    borderRadius: getComputedStyle(el).borderRadius,
+    boxShadow: `0 0 0 2px ${color}`,
+    pointerEvents: 'none',
+    zIndex: '60',
+    willChange: 'transform, opacity',
+  });
+  document.body.append(ring);
+  const scaleX = (rect.width + spread * 2) / rect.width;
+  const scaleY = (rect.height + spread * 2) / rect.height;
+  const animation = ring.animate(
+    [
+      { transform: 'scale(1)', opacity: strength },
+      { transform: `scale(${scaleX}, ${scaleY})`, opacity: 0 },
+    ],
+    { duration: ms, easing: 'ease-out' },
+  );
+  animation.onfinish = animation.oncancel = () => ring.remove();
+}
+
 function manualKey(storageKey?: string) {
   return `${MANUAL_TODO_PREFIX}${storageKey || 'default'}`;
 }
@@ -76,6 +106,9 @@ export function TodoBar({
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const writtenKeyRef = useRef(storageKey);
+  const trayRef = useRef<HTMLDivElement>(null);
+  const prevStatuses = useRef<Map<string, string>>(new Map());
+  const animatedOnce = useRef(false);
 
   useEffect(() => {
     setManualTodos(readManualTodos(storageKey));
@@ -118,6 +151,58 @@ export function TodoBar({
       ? '할 일을 추가해 보세요'
       : inProgress?.content ||
         (allDone ? '모두 끝났어요' : pending?.content || '진행 중');
+
+  // pi-oven's todo tray: a finished step pops and spreads a ring; when the last
+  // step lands, the whole card boings once. Only the transition animates, not
+  // a list re-read or a page reload.
+  useEffect(() => {
+    const next = new Map(combined.map((todo) => [todo.id, todo.status]));
+    const finished = animatedOnce.current
+      ? combined.filter(
+          (todo) =>
+            todo.status === 'completed' &&
+            prevStatuses.current.has(todo.id) &&
+            prevStatuses.current.get(todo.id) !== 'completed',
+        )
+      : [];
+    prevStatuses.current = next;
+    animatedOnce.current = true;
+    if (!finished.length || !trayRef.current) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    requestAnimationFrame(() => {
+      const tray = trayRef.current;
+      if (!tray) return;
+      if (allDone) {
+        tray.animate(
+          [
+            { transform: 'scale(1)' },
+            { transform: 'scale(1.035)', offset: 0.28 },
+            { transform: 'scale(0.988)', offset: 0.52 },
+            { transform: 'scale(1.01)', offset: 0.74 },
+            { transform: 'scale(1)' },
+          ],
+          { duration: 700, easing: 'cubic-bezier(0.3, 1.4, 0.5, 1)' },
+        );
+        pulseRing(tray, '#47d486', 12, 700, 0.55);
+      }
+      for (const todo of finished) {
+        document
+          .querySelectorAll<HTMLElement>(`[data-todo-seg="${CSS.escape(todo.id)}"]`)
+          .forEach((element) => {
+            element.animate(
+              [
+                { transform: 'scale(1)' },
+                { transform: 'scale(1.7)', offset: 0.3 },
+                { transform: 'scale(0.9)', offset: 0.6 },
+                { transform: 'scale(1)' },
+              ],
+              { duration: 640, easing: 'cubic-bezier(0.3, 1.4, 0.5, 1)' },
+            );
+            pulseRing(element, '#47d486', 8, 640, 0.6);
+          });
+      }
+    });
+  }, [allDone, combined]);
 
   const focusAdd = () => {
     setOpen(true);
@@ -204,7 +289,10 @@ export function TodoBar({
   }
 
   return (
-    <div className={`todo-card ${open ? 'expanded' : ''} ${allDone ? 'is-done' : 'is-active'}`}>
+    <div
+      ref={trayRef}
+      className={`todo-card ${open ? 'expanded' : ''} ${allDone ? 'is-done' : 'is-active'}`}
+    >
       <div className="todo-head">
         <button
           type="button"
@@ -256,7 +344,7 @@ export function TodoBar({
           <ul>
             {todos.map((todo) => (
               <li key={todo.id} className={`todo-item status-${todo.status}`}>
-                <span className={`todo-check status-${todo.status}`}>
+                <span className={`todo-check status-${todo.status}`} data-todo-seg={todo.id}>
                   {todo.status === 'completed' ? (
                     <Check size={11} strokeWidth={3} />
                   ) : todo.status === 'in_progress' ? (
@@ -279,6 +367,7 @@ export function TodoBar({
                 <button
                   type="button"
                   className={`todo-check status-${todo.status}`}
+                  data-todo-seg={todo.id}
                   onClick={() => toggleManualTodo(todo.id)}
                   aria-label={
                     todo.status === 'completed'
